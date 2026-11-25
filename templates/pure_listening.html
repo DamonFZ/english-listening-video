@@ -25,14 +25,12 @@
     const ctx = canvas.getContext("2d");
     const audioEl = document.getElementById("audio");
 
-    // 布局：标题在上，图片居中铺满，提示在下；互不遮挡
-    const TITLE_Y = 96;
-    const IMG_AREA = { x: 120, y: 150, w: W - 240, h: 800 };   // 1680 x 800
-    const HINT_Y = 1000;
+    // 布局：仅顶部标题 + 中间最大化对比图，无底栏文字（极简大图直出）
+    const TITLE_Y = 80;
+    const IMG_AREA = { x: 96, y: 130, w: 1728, h: 912 };   // 宽约 90%，高约 84%
 
     const BG = "#FFFFFF";
     const TITLE_COLOR = "#1f2937";
-    const HINT_COLOR = "#4b5563";
 
     const state = {
       q: null,
@@ -69,11 +67,6 @@
 
     function drawImage() {
       const a = IMG_AREA;
-      // 极淡卡片底，强化原图区域但不喧宾夺主
-      roundRect(a.x - 8, a.y - 8, a.w + 16, a.h + 16, 24);
-      ctx.fillStyle = "#ffffff";
-      ctx.fill();
-
       if (state.img && state.img.complete && state.img.naturalWidth) {
         const iw = state.img.naturalWidth, ih = state.img.naturalHeight;
         const scale = Math.min(a.w / iw, a.h / ih);
@@ -87,33 +80,10 @@
       }
     }
 
-    function drawHint() {
-      const q = state.q || {};
-      const text = (q.hint || "听录音，选择正确的答案").trim();
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.font = "36px 'PingFang SC', 'Microsoft YaHei', sans-serif";
-      const tw = ctx.measureText(text).width;
-      const padX = 40, padY = 16;
-      const bx = W / 2 - tw / 2 - padX, by = HINT_Y - 30;
-      roundRect(bx, by, tw + padX * 2, 60, 30);
-      ctx.fillStyle = "rgba(31,41,55,0.06)"; ctx.fill();
-      ctx.fillStyle = HINT_COLOR;
-      ctx.fillText(text, W / 2, HINT_Y);
-
-      // 听音阶段：在提示旁画一个呼吸点，表示正在播放
-      if (state.phase === "listening") {
-        const r = 10 + Math.sin(state.flash / 6) * 4;
-        ctx.beginPath();
-        ctx.arc(W / 2 - tw / 2 - 34, HINT_Y, r, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(239,68,68,0.85)"; ctx.fill();
-      }
-    }
-
     function render() {
       drawBackground();
       drawTitle();
       drawImage();
-      drawHint();
     }
 
     function tick() {

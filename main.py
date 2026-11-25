@@ -171,15 +171,22 @@ def run_pipeline(
     print(f"输出目录 : {out_dir}")
     print("-" * 64)
 
+    # 0) 图片预处理：渲染前裁切原图外围多余纯白空边，使 A/B 卡片更大、留白更克制
+    print("[0/4] 图片预处理（裁切外围纯白空边）...")
+    from src.image_utils import image_size, trim_white_border
+    render_img = out_dir / f"{img.stem}_render.png"
+    render_img = trim_white_border(img, render_img)
+    print(f"  原图尺寸 : {image_size(img)} → 渲染尺寸 : {image_size(render_img)}")
+
     # 1) 出题（纯听力模式用指定稿件，不调用 LLM；否则看图出题）
     print("[1/4] 生成听力文案 ...")
     gen = QuestionGenerator()
     if is_pure:
-        question = gen.generate_pure(script, img, level=target_level, save_debug=debug_path)
+        question = gen.generate_pure(script, render_img, level=target_level, save_debug=debug_path)
         print(f"  模式     : 纯听力（pure_listening，画面不展示答案/翻译/解析）")
         print(f"  英文听力稿: {question.audio_text}")
     else:
-        question = gen.generate(img, level=target_level, question_type=target_type,
+        question = gen.generate(render_img, level=target_level, question_type=target_type,
                                 save_debug=debug_path)
         print(f"  文案来源 : {question.source}")
         print(f"  情境引导 : {question.context_en}")
