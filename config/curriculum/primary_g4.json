@@ -1,0 +1,104 @@
+{
+  "level": "primary_g4",
+  "name": "小学四年级",
+  "stage": "primary",
+  "grade": 4,
+  "description": "首期默认学段：小学四年级英语听力，主打“看图二选一”题型。后续可按同样结构扩展到其他年级。",
+  "tts": {
+    "voice_type": "BV001_streaming",
+    "speed_ratio": 0.9,
+    "pause_ms": 600,
+    "read_times": 2,
+    "note": "语速倍率与停顿时长按学段匹配：小学阶段语速略慢、停顿略长，便于跟读与理解。"
+  },
+  "units": [
+    {
+      "id": "colors",
+      "title": "Colors",
+      "topic": "颜色",
+      "vocabulary": ["red", "blue", "green", "yellow", "black", "white", "pink", "orange", "purple", "brown"],
+      "sentences": [
+        "What color is it?",
+        "It is red.",
+        "I have a blue pen."
+      ]
+    },
+    {
+      "id": "numbers",
+      "title": "Numbers",
+      "topic": "数量",
+      "vocabulary": ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"],
+      "sentences": [
+        "How many apples?",
+        "I can see five apples.",
+        "There are two cats."
+      ]
+    },
+    {
+      "id": "shopping",
+      "title": "Shopping",
+      "topic": "价格与购物",
+      "vocabulary": ["how much", "expensive", "cheap", "yuan", "dollar", "buy", "sell"],
+      "sentences": [
+        "How much is it?",
+        "It is ten yuan.",
+        "The book is cheap."
+      ]
+    },
+    {
+      "id": "positions",
+      "title": "Positions",
+      "topic": "方位",
+      "vocabulary": ["in", "on", "under", "behind", "in front of", "next to", "between"],
+      "sentences": [
+        "Where is the ball?",
+        "It is on the desk.",
+        "The cat is under the chair."
+      ]
+    }
+  ],
+  "core_vocabulary": [
+    "red", "blue", "green", "yellow", "black", "white",
+    "one", "two", "three", "four", "five",
+    "how much", "expensive", "cheap", "yuan",
+    "in", "on", "under", "behind", "in front of"
+  ],
+  "core_sentences": [
+    "What color is it? It is ...",
+    "How many ... can you see?",
+    "How much is it? It is ... yuan.",
+    "Where is ...? It is ..."
+  ],
+  "contrast_dimensions": [
+    {
+      "dimension": "color",
+      "label": "颜色",
+      "example_question": "Which picture is red?"
+    },
+    {
+      "dimension": "number",
+      "label": "数量",
+      "example_question": "Which picture has three apples?"
+    },
+    {
+      "dimension": "price",
+      "label": "价格",
+      "example_question": "Which one is cheaper?"
+    },
+    {
+      "dimension": "position",
+      "label": "方位",
+      "example_question": "Which picture shows the ball under the desk?"
+    },
+    {
+      "dimension": "size",
+      "label": "大小",
+      "example_question": "Which picture is bigger?"
+    },
+    {
+      "dimension": "action",
+      "label": "动作",
+      "example_question": "Which picture shows a girl running?"
+    }
+  ]
+}

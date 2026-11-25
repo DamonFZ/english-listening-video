@@ -1,0 +1,59 @@
+# ===== 环境与密钥 =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# ===== 依赖缓存 =====
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ===== Playwright / 浏览器 =====
+playwright/.local-browsers/
+.playwright/
+
+# ===== 项目生成产物（严禁提交）=====
+output/
+tmp/
+temp/
+recordings/
+*.mp4
+*.webm
+*.wav
+*.mp3
+*.m4a
+
+# ===== 临时录制 / 帧缓存 =====
+frames/
+screenshots/
+*.tmp
+*.log

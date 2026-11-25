@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1080, initial-scale=1.0" />
+  <title>看图二选一 A/B 对比 - 英语听力</title>
+  <style>
+    /* ============================================================
+       竖屏舞台：1080 x 1920
+       Playwright 录制时将 viewport 设为 1080x1920，deviceScaleFactor 按需设置。
+       整个 #stage 固定尺寸，保证录制画面与设计稿一致。
+       ============================================================ */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1080px;
+      height: 1920px;
+      background: #0f172a;
+      font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    #stage {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      background: linear-gradient(180deg, #1e3a8a 0%, #0f172a 60%, #020617 100%);
+      color: #f8fafc;
+      overflow: hidden;
+    }
+
+    /* ---------- 学段角标区 ---------- */
+    #level-badge {
+      position: absolute;
+      top: 60px;
+      left: 60px;
+      padding: 18px 36px;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.35);
+      border-radius: 999px;
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      backdrop-filter: blur(6px);
+    }
+
+    /* ---------- 标题区 ---------- */
+    #title {
+      position: absolute;
+      top: 70px;
+      right: 60px;
+      font-size: 44px;
+      font-weight: 800;
+      color: #fde68a;
+      text-align: right;
+      max-width: 700px;
+    }
+
+    /* ---------- A/B 对比图展示区 ---------- */
+    #choices {
+      position: absolute;
+      top: 240px;
+      left: 60px;
+      right: 60px;
+      display: flex;
+      gap: 40px;
+      justify-content: space-between;
+    }
+    .choice-card {
+      flex: 1;
+      height: 820px;
+      border-radius: 32px;
+      background: rgba(255,255,255,0.06);
+      border: 4px solid rgba(255,255,255,0.18);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: border-color .3s, box-shadow .3s, transform .3s;
+    }
+    .choice-card .label {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      width: 72px;
+      height: 72px;
+      line-height: 72px;
+      text-align: center;
+      border-radius: 50%;
+      background: #f59e0b;
+      color: #111;
+      font-size: 40px;
+      font-weight: 900;
+    }
+    .choice-card img {
+      max-width: 86%;
+      max-height: 620px;
+      object-fit: contain;
+      border-radius: 20px;
+    }
+    .choice-card .placeholder {
+      font-size: 40px;
+      color: rgba(255,255,255,0.45);
+    }
+    .choice-card.correct {
+      border-color: #22c55e;
+      box-shadow: 0 0 60px rgba(34,197,94,0.6);
+      transform: scale(1.03);
+    }
+    .choice-card.wrong {
+      border-color: #ef4444;
+      opacity: 0.55;
+    }
+
+    /* ---------- 英文听力字幕区 ---------- */
+    #subtitle {
+      position: absolute;
+      bottom: 560px;
+      left: 60px;
+      right: 60px;
+      min-height: 160px;
+      padding: 36px 48px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 24px;
+      border: 2px solid rgba(255,255,255,0.15);
+      font-size: 56px;
+      font-weight: 700;
+      line-height: 1.4;
+      text-align: center;
+    }
+    #subtitle .zh {
+      display: block;
+      margin-top: 14px;
+      font-size: 34px;
+      font-weight: 500;
+      color: #cbd5e1;
+    }
+
+    /* ---------- 倒计时 / 提示区 ---------- */
+    #hint {
+      position: absolute;
+      bottom: 360px;
+      left: 60px;
+      right: 60px;
+      text-align: center;
+      font-size: 40px;
+      color: #fbbf24;
+      font-weight: 700;
+    }
+    #countdown {
+      font-size: 120px;
+      font-weight: 900;
+      color: #f87171;
+      text-shadow: 0 0 30px rgba(248,113,113,0.6);
+    }
+
+    /* ---------- 答案揭晓区 ---------- */
+    #reveal {
+      position: absolute;
+      bottom: 120px;
+      left: 60px;
+      right: 60px;
+      padding: 40px;
+      background: rgba(34,197,94,0.15);
+      border: 3px solid #22c55e;
+      border-radius: 28px;
+      text-align: center;
+      opacity: 0;
+      transform: translateY(40px);
+      transition: opacity .4s, transform .4s;
+    }
+    #reveal.show { opacity: 1; transform: translateY(0); }
+    #reveal .reveal-answer {
+      font-size: 64px;
+      font-weight: 900;
+      color: #4ade80;
+    }
+    #reveal .reveal-explain {
+      margin-top: 18px;
+      font-size: 34px;
+      color: #e2e8f0;
+      line-height: 1.5;
+    }
+
+    /* 调试状态指示（录制时可隐藏） */
+    #dbg-state {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 20px;
+      color: rgba(255,255,255,0.4);
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div id="level-badge">小学四年级</div>
+    <div id="title">看图二选一</div>
+
+    <div id="dbg-state">state: idle</div>
+
+    <!-- A/B 对比图展示区 -->
+    <div id="choices">
+      <div class="choice-card" id="card-a">
+        <div class="label">A</div>
+        <img id="img-a" alt="" />
+        <div class="placeholder" id="ph-a">图片 A</div>
+      </div>
+      <div class="choice-card" id="card-b">
+        <div class="label">B</div>
+        <img id="img-b" alt="" />
+        <div class="placeholder" id="ph-b">图片 B</div>
+      </div>
+    </div>
+
+    <!-- 英文听力字幕区 -->
+    <div id="subtitle">
+      <span class="en">Listen and choose.</span>
+      <span class="zh">听一听，选一选。</span>
+    </div>
+
+    <!-- 倒计时 / 提示区 -->
+    <div id="hint">
+      <div id="countdown"></div>
+    </div>
+
+    <!-- 答案揭晓区 -->
+    <div id="reveal">
+      <div class="reveal-answer" id="reveal-answer">Answer: A</div>
+      <div class="reveal-explain" id="reveal-explain"></div>
+    </div>
+  </div>
+
+  <!-- 音频元素：由 Playwright 注入 src 或使用 Web Audio 播放 -->
+  <audio id="audio" preload="auto"></audio>
+
+  <script>
+    /* ============================================================
+       全局 JS 接口：供 Playwright (browser_recorder.py) 驱动状态切换与音频播放。
+       约定：所有外部调用走 window.Stage.*，状态变化通过 onStateChange 回调通知。
+       状态机：idle -> loaded -> countdown -> playing -> reveal -> done
+       ============================================================ */
+    (function () {
+      const state = {
+        current: "idle",
+        question: null,
+        audioEl: document.getElementById("audio"),
+      };
+
+      const listeners = new Set();
+      function setState(s) {
+        state.current = s;
+        document.getElementById("dbg-state").textContent = "state: " + s;
+        listeners.forEach((fn) => {
+          try { fn(s); } catch (e) { console.error(e); }
+        });
+      }
+
+      function setText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text == null ? "" : text;
+      }
+
+      const Stage = {
+        /** 注册状态变化回调 */
+        onStateChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+
+        /** 读取当前状态 */
+        getState() { return state.current; },
+
+        /**
+         * 加载题目数据（由 Python 侧传入）。
+         * data 结构示例：
+         * {
+         *   levelBadge: "小学四年级",
+         *   title: "看图二选一",
+         *   imageA: "file:///.../a.png" 或 dataURL,
+         *   imageB: "file:///.../b.png",
+         *   subtitleEn: "Which picture is red?",
+         *   subtitleZh: "哪张图片是红色的？",
+         *   answer: "A" | "B",
+         *   explain: "It is red."
+         * }
+         */
+        loadQuestion(data) {
+          state.question = data || {};
+          setText("level-badge", data.levelBadge || "");
+          setText("title", data.title || "");
+
+          ["A", "B"].forEach((k) => {
+            const key = "image" + k;
+            const img = document.getElementById("img-" + k.toLowerCase());
+            const ph = document.getElementById("ph-" + k.toLowerCase());
+            const card = document.getElementById("card-" + k.toLowerCase());
+            card.classList.remove("correct", "wrong");
+            if (data[key]) {
+              img.src = data[key];
+              img.style.display = "block";
+              ph.style.display = "none";
+            } else {
+              img.removeAttribute("src");
+              img.style.display = "none";
+              ph.style.display = "block";
+            }
+          });
+
+          const sub = document.getElementById("subtitle");
+          sub.innerHTML = '<span class="en"></span><span class="zh"></span>';
+          sub.querySelector(".en").textContent = data.subtitleEn || "";
+          sub.querySelector(".zh").textContent = data.subtitleZh || "";
+
+          document.getElementById("reveal").classList.remove("show");
+          setText("countdown", "");
+          setText("hint", "");
+
+          setState("loaded");
+          return true;
+        },
+
+        /**
+         * 播放音频。
+         * src: 音频 URL / file:// 路径 / dataURL；若为空则不播放（仅切换状态用于占位）。
+         * 返回 Promise，在音频播放结束时 resolve。
+         */
+        playAudio(src) {
+          return new Promise((resolve) => {
+            const el = state.audioEl;
+            const done = () => { resolve(); };
+            el.onended = done;
+            el.onerror = (e) => { console.error("audio error", e); resolve(); };
+            if (src) {
+              el.src = src;
+              el.play().catch((e) => { console.error("play failed", e); resolve(); });
+            } else {
+              // 无音频占位：短暂延迟后结束，便于时序调试
+              setTimeout(done, 800);
+            }
+            setState("playing");
+          });
+        },
+
+        /**
+         * 开始倒计时（听音作答前）。
+         * seconds: 倒计时秒数；每秒更新界面，结束后 resolve。
+         */
+        startCountdown(seconds) {
+          return new Promise((resolve) => {
+            let n = Math.max(0, Math.floor(seconds || 0));
+            const cd = document.getElementById("countdown");
+            setState("countdown");
+            const tick = () => {
+              setText("countdown", n > 0 ? String(n) : "");
+              if (n <= 0) { resolve(); return; }
+              n -= 1;
+              setTimeout(tick, 1000);
+            };
+            tick();
+          });
+        },
+
+        /**
+         * 揭晓答案。
+         * answer: "A" | "B"；高亮正确项，灰掉错误项。
+         */
+        revealAnswer(answer, explain) {
+          const ans = (answer || "").toUpperCase();
+          ["a", "b"].forEach((k) => {
+            const card = document.getElementById("card-" + k);
+            card.classList.remove("correct", "wrong");
+            if (k === ans.toLowerCase()) card.classList.add("correct");
+            else card.classList.add("wrong");
+          });
+          setText("reveal-answer", "Answer: " + (ans || "?"));
+          setText("reveal-explain", explain || "");
+          document.getElementById("reveal").classList.add("show");
+          setState("reveal");
+          return true;
+        },
+
+        /** 重置舞台到初始状态 */
+        reset() {
+          state.question = null;
+          state.audioEl.pause();
+          state.audioEl.removeAttribute("src");
+          document.getElementById("img-a").removeAttribute("src");
+          document.getElementById("img-b").removeAttribute("src");
+          document.getElementById("reveal").classList.remove("show");
+          ["a", "b"].forEach((k) =>
+            document.getElementById("card-" + k).classList.remove("correct", "wrong")
+          );
+          setText("countdown", "");
+          setText("subtitle", "");
+          setState("idle");
+          return true;
+        },
+
+        /**
+         * 一键流水线（可选便捷接口）：倒计时 -> 播放音频 -> 揭晓答案。
+         * Playwright 侧也可分步调用以精确控制录制起止点。
+         */
+        async runFlow(opts) {
+          opts = opts || {};
+          if (opts.countdown) await Stage.startCountdown(opts.countdown);
+          await Stage.playAudio(opts.audioSrc);
+          if (opts.revealDelay != null) {
+            await new Promise((r) => setTimeout(r, opts.revealDelay));
+          }
+          Stage.revealAnswer(opts.answer, opts.explain);
+          setState("done");
+        },
+      };
+
+      window.Stage = Stage;
+      setState("idle");
+    })();
+  </script>
+</body>
+</html>
