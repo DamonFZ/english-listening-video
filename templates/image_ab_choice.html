@@ -2,39 +2,43 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=1080, initial-scale=1.0" />
-  <title>看图二选一 A/B 对比 - 英语听力</title>
+  <meta name="viewport" content="width=1920, initial-scale=1.0" />
+  <title>看图二选一 A/B 对比 - 英语听力（横屏）</title>
   <style>
     html, body {
-      margin: 0; padding: 0; width: 1080px; height: 1920px;
+      margin: 0; padding: 0; width: 1920px; height: 1080px;
       background: #0f172a; overflow: hidden;
       font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     }
-    #stage { display: block; width: 1080px; height: 1920px; }
+    #stage { display: block; width: 1920px; height: 1080px; }
   </style>
 </head>
 <body>
-  <canvas id="stage" width="1080" height="1920"></canvas>
+  <canvas id="stage" width="1920" height="1080"></canvas>
   <!-- 音频元素：由 Python 注入 data URI；其音轨被并入录制流 -->
   <audio id="audio" preload="auto" crossorigin="anonymous"></audio>
 
   <script>
   (function () {
-    const W = 1080, H = 1920;
+    const W = 1920, H = 1080;
     const canvas = document.getElementById("stage");
     const ctx = canvas.getContext("2d");
     const audioEl = document.getElementById("audio");
 
-    const PAD = 60;
-    const IMG = { x: 60, y: 230, w: 960, h: 900 };   // 对比图区域
-    const SUB = { x: 60, y: 1180, w: 960, h: 200 };    // 字幕区
-    const HINT = { x: 60, y: 1430, w: 960, h: 230 };   // 提示/倒计时区
-    const REV = { x: 60, y: 1700, w: 960, h: 160 };    // 揭晓区
+    // ---------- 横屏布局常量（1920x1080）----------
+    const PAD = 48;
+    const HEADER_H = 96;
+    const MAIN_Y = 116;
+    const MAIN_H = H - MAIN_Y - PAD;          // 916
+    const IMG = { x: PAD, y: MAIN_Y, w: 1160, h: MAIN_H };
+    const RIGHT = { x: IMG.x + IMG.w + 24, y: MAIN_Y, w: W - (IMG.x + IMG.w + 24) - PAD, h: MAIN_H }; // 640
+    const PHASE = { x: RIGHT.x, y: RIGHT.y, w: RIGHT.w, h: 250 };
+    const TRANS = { x: RIGHT.x, y: RIGHT.y + 272, w: RIGHT.w, h: RIGHT.h - 272 };
 
     const state = {
       q: null,
       img: null,
-      phase: "idle",      // idle | ready | countdown | playing | reveal
+      phase: "idle",      // idle | ready | listening | countdown | reveal | done
       countdown: 0,
       playing: false,
       revealed: false,
@@ -42,7 +46,7 @@
       flash: 0,
     };
 
-    let audioCtx = null, audioDest = null, mediaSource = null;
+    let audioCtx = null, audioDest = null;
 
     // ---------------- 绘图工具 ----------------
     function roundRect(x, y, w, h, r) {
@@ -54,115 +58,94 @@
       ctx.arcTo(x, y, x + w, y, r);
       ctx.closePath();
     }
+
     function drawBackground() {
-      const g = ctx.createLinearGradient(0, 0, 0, H);
+      const g = ctx.createLinearGradient(0, 0, W, H);
       g.addColorStop(0, "#1e3a8a");
-      g.addColorStop(0.6, "#0f172a");
+      g.addColorStop(0.55, "#0f172a");
       g.addColorStop(1, "#020617");
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
     }
+
     function drawHeader() {
       const q = state.q || {};
-      // 学段角标
-      ctx.font = "bold 34px 'PingFang SC', sans-serif";
+      // 学段角标（左）
+      let cursorX = PAD;
       const badge = q.levelBadge || "";
       if (badge) {
+        ctx.font = "bold 28px 'PingFang SC', sans-serif";
         const tw = ctx.measureText(badge).width;
-        roundRect(PAD, 60, tw + 72, 68, 34);
-        ctx.fillStyle = "rgba(255,255,255,0.14)";
-        ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.stroke();
-        ctx.fillStyle = "#fff";
-        ctx.textBaseline = "middle"; ctx.textAlign = "left";
-        ctx.fillText(badge, PAD + 36, 60 + 34);
+        const bw = tw + 56, bh = 52;
+        roundRect(cursorX, (HEADER_H - bh) / 2, bw, bh, 26);
+        ctx.fillStyle = "rgba(250,204,21,0.16)"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(250,204,21,0.6)"; ctx.stroke();
+        ctx.fillStyle = "#fde68a"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        ctx.fillText(badge, cursorX + 28, HEADER_H / 2);
+        cursorX += bw + 20;
       }
       // 标题
-      ctx.font = "bold 46px 'PingFang SC', sans-serif";
-      ctx.fillStyle = "#fde68a"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.fillText(q.title || "看图二选一", W - PAD, 60 + 34);
+      ctx.font = "bold 38px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#f8fafc"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+      ctx.fillText(q.title || "看图二选一 · 英语听力", cursorX, HEADER_H / 2);
+
+      // 阶段提示（右）
+      const phaseText = { ready: "准备", listening: "听音", countdown: "作答", reveal: "揭晓" }[state.phase] || "";
+      if (phaseText) {
+        ctx.font = "bold 26px 'PingFang SC', sans-serif";
+        const tw = ctx.measureText(phaseText).width;
+        const bw = tw + 48, bh = 48;
+        const bx = W - PAD - bw;
+        roundRect(bx, (HEADER_H - bh) / 2, bw, bh, 24);
+        ctx.fillStyle = state.phase === "reveal" ? "rgba(34,197,94,0.2)" : "rgba(56,189,248,0.18)";
+        ctx.fill();
+        ctx.fillStyle = state.phase === "reveal" ? "#4ade80" : "#7dd3fc";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(phaseText, bx + bw / 2, HEADER_H / 2);
+      }
     }
-    function drawImageArea() {
-      // 背景卡片
-      roundRect(IMG.x, IMG.y, IMG.w, IMG.h, 32);
-      ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.stroke();
+
+    function drawImageCard() {
+      // 卡片底
+      roundRect(IMG.x, IMG.y, IMG.w, IMG.h, 28);
+      ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.stroke();
 
       if (state.img && state.img.complete && state.img.naturalWidth) {
         const iw = state.img.naturalWidth, ih = state.img.naturalHeight;
-        const scale = Math.min(IMG.w / iw, IMG.h / ih) * 0.92;
+        const scale = Math.min(IMG.w / iw, IMG.h / ih) * 0.94;
         const dw = iw * scale, dh = ih * scale;
         const dx = IMG.x + (IMG.w - dw) / 2, dy = IMG.y + (IMG.h - dh) / 2;
         ctx.drawImage(state.img, dx, dy, dw, dh);
       } else {
         ctx.fillStyle = "rgba(255,255,255,0.4)";
-        ctx.font = "36px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.font = "32px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText("（图片加载中）", IMG.x + IMG.w / 2, IMG.y + IMG.h / 2);
       }
 
-      // A / B 角标
-      drawBadge("A", IMG.x + 90, IMG.y + IMG.h - 90);
-      drawBadge("B", IMG.x + IMG.w - 90, IMG.y + IMG.h - 90);
+      // A / B 选项角标（图片下方两角）
+      drawOptionBadge("A", IMG.x + 110, IMG.y + IMG.h - 90);
+      drawOptionBadge("B", IMG.x + IMG.w - 110, IMG.y + IMG.h - 90);
     }
-    function drawBadge(letter, cx, cy) {
+
+    function drawOptionBadge(letter, cx, cy) {
       const correct = (state.highlight === letter);
-      ctx.beginPath(); ctx.arc(cx, cy, 52, 0, Math.PI * 2);
-      ctx.fillStyle = correct ? "#22c55e" : "#f59e0b";
+      const r = 56;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = correct ? "#22c55e" : "rgba(255,255,255,0.92)";
       ctx.fill();
       if (correct) {
-        ctx.lineWidth = 8; ctx.strokeStyle = "rgba(34,197,94,0.6)";
-        ctx.beginPath(); ctx.arc(cx, cy, 64 + Math.sin(state.flash) * 6, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 8; ctx.strokeStyle = "rgba(34,197,94,0.55)";
+        ctx.beginPath(); ctx.arc(cx, cy, r + 12 + Math.sin(state.flash / 4) * 6, 0, Math.PI * 2); ctx.stroke();
       }
-      ctx.fillStyle = "#111"; ctx.font = "bold 46px sans-serif";
+      ctx.fillStyle = correct ? "#052e16" : "#0f172a";
+      ctx.font = "bold 48px sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(letter, cx, cy + 2);
     }
-    function drawSubtitle() {
-      const q = state.q || {};
-      roundRect(SUB.x, SUB.y, SUB.w, SUB.h, 24);
-      ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.stroke();
-      ctx.fillStyle = "#f8fafc"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.font = "bold 52px 'PingFang SC', sans-serif";
-      ctx.fillText(q.subtitleEn || "", SUB.x + SUB.w / 2, SUB.y + 62);
-      ctx.fillStyle = "#cbd5e1"; ctx.font = "32px 'PingFang SC', sans-serif";
-      ctx.fillText(q.subtitleZh || "", SUB.x + SUB.w / 2, SUB.y + 132);
-    }
-    function drawHint() {
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      const cx = HINT.x + HINT.w / 2, cy = HINT.y + HINT.h / 2;
-      if (state.phase === "countdown" && state.countdown > 0) {
-        ctx.fillStyle = "#fbbf24"; ctx.font = "bold 36px sans-serif";
-        ctx.fillText("听音作答倒计时", cx, cy - 60);
-        ctx.fillStyle = "#f87171"; ctx.font = "bold 140px sans-serif";
-        ctx.fillText(String(state.countdown), cx, cy + 40);
-      } else if (state.phase === "playing") {
-        ctx.fillStyle = "#38bdf8"; ctx.font = "bold 40px sans-serif";
-        const dots = ".".repeat((Math.floor(state.flash / 8) % 3) + 1);
-        ctx.fillText("正在播放听力" + dots, cx, cy);
-      } else if (state.phase === "ready") {
-        ctx.fillStyle = "#fbbf24"; ctx.font = "bold 40px sans-serif";
-        ctx.fillText("请看题目，准备听音", cx, cy);
-      } else {
-        ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "34px sans-serif";
-        ctx.fillText("听一听，选一选", cx, cy);
-      }
-    }
-    function drawReveal() {
-      if (!state.revealed) return;
-      const q = state.q || {};
-      roundRect(REV.x, REV.y, REV.w, REV.h, 24);
-      ctx.fillStyle = "rgba(34,197,94,0.15)"; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = "#22c55e"; ctx.stroke();
-      ctx.fillStyle = "#4ade80"; ctx.font = "bold 60px sans-serif";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("正确答案：" + (q.answer || "?"), REV.x + REV.w / 2, REV.y + 55);
-      if (q.explain) {
-        ctx.fillStyle = "#e2e8f0"; ctx.font = "30px 'PingFang SC', sans-serif";
-        wrapText(q.explain, REV.x + REV.w / 2, REV.y + 112, REV.w - 80, 38, "center");
-      }
-    }
-    function wrapText(text, cx, y, maxWidth, lineHeight, align) {
+
+    function wrapTextLeft(text, x, y, maxWidth, lineHeight) {
+      // 按字符（兼容中英文）折行，左对齐
       const chars = (text || "").split("");
       let line = "", lines = [];
       for (const c of chars) {
@@ -171,18 +154,115 @@
         else line = test;
       }
       if (line) lines.push(line);
-      const startY = y - ((lines.length - 1) * lineHeight) / 2;
-      ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
-      lines.forEach((ln, i) => ctx.fillText(ln, cx, startY + i * lineHeight));
+      ctx.textAlign = "left"; ctx.textBaseline = "top";
+      lines.forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
+      return lines.length;
     }
+
+    function drawRightPanel() {
+      // 右侧面板底
+      roundRect(RIGHT.x, RIGHT.y, RIGHT.w, RIGHT.h, 28);
+      ctx.fillStyle = "rgba(255,255,255,0.04)"; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.stroke();
+
+      drawPhaseHint();
+      if (state.revealed) drawTranscript();
+      else drawChoiceGuide();
+    }
+
+    function drawPhaseHint() {
+      const cx = PHASE.x + PHASE.w / 2;
+      const cy = PHASE.y + PHASE.h / 2;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+
+      if (state.phase === "ready") {
+        ctx.fillStyle = "#fbbf24"; ctx.font = "bold 42px 'PingFang SC', sans-serif";
+        ctx.fillText("请看题目，准备听音", cx, cy);
+      } else if (state.phase === "listening") {
+        const dots = ".".repeat((Math.floor(state.flash / 8) % 3) + 1);
+        ctx.fillStyle = "#38bdf8"; ctx.font = "bold 46px 'PingFang SC', sans-serif";
+        ctx.fillText("正在播放听力" + dots, cx, cy - 36);
+        ctx.fillStyle = "#cbd5e1"; ctx.font = "30px 'PingFang SC', sans-serif";
+        ctx.fillText("请仔细听，选择 A 或 B", cx, cy + 30);
+        // 声波动画
+        const bars = 5;
+        for (let i = 0; i < bars; i++) {
+          const bh = 18 + Math.abs(Math.sin(state.flash / 5 + i)) * 34;
+          const bx = cx - (bars * 26) / 2 + i * 26;
+          ctx.fillStyle = "rgba(56,189,248,0.7)";
+          roundRect(bx, cy + 70 - bh / 2, 14, bh, 7); ctx.fill();
+        }
+      } else if (state.phase === "countdown" && state.countdown > 0) {
+        ctx.fillStyle = "#fbbf24"; ctx.font = "bold 34px 'PingFang SC', sans-serif";
+        ctx.fillText("思考并作答", cx, cy - 56);
+        ctx.fillStyle = "#f87171"; ctx.font = "bold 150px sans-serif";
+        ctx.fillText(String(state.countdown), cx, cy + 40);
+      } else if (state.phase === "reveal") {
+        ctx.fillStyle = "#4ade80"; ctx.font = "bold 44px 'PingFang SC', sans-serif";
+        ctx.fillText("答案揭晓", cx, cy - 24);
+        ctx.fillStyle = "#f8fafc"; ctx.font = "bold 64px sans-serif";
+        ctx.fillText("正确答案：" + ((state.q && state.q.answer) || "?"), cx, cy + 48);
+      }
+    }
+
+    function drawChoiceGuide() {
+      // 听音/倒计时阶段：提示 A/B 两个选项（不剧透答案）
+      const cx = TRANS.x + TRANS.w / 2;
+      const cy = TRANS.y + 40;
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "28px 'PingFang SC', sans-serif";
+      ctx.fillText("请在听到问题后选择：", cx, cy);
+      // 两个选项按钮
+      const bw = 220, bh = 84, gap = 40;
+      const totalW = bw * 2 + gap;
+      let x = cx - totalW / 2;
+      const y = cy + 56;
+      for (const letter of ["A", "B"]) {
+        roundRect(x, y, bw, bh, 18);
+        ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.stroke();
+        ctx.fillStyle = "#f8fafc"; ctx.font = "bold 40px sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("选项 " + letter, x + bw / 2, y + bh / 2);
+        x += bw + gap;
+      }
+    }
+
+    function drawTranscript() {
+      const q = state.q || {};
+      const x = TRANS.x + 36;
+      const maxW = TRANS.w - 72;
+      let y = TRANS.y + 24;
+
+      // 听力原文（英文）
+      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText("📖 听力原文", x, y); y += 36;
+      ctx.fillStyle = "#f8fafc"; ctx.font = "34px 'PingFang SC', sans-serif";
+      const enLines = wrapTextLeft(q.subtitleEn || "", x, y, maxW, 44);
+      y += enLines * 44 + 18;
+
+      // 中文翻译
+      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
+      ctx.fillText("🀄 中文翻译", x, y); y += 36;
+      ctx.fillStyle = "#cbd5e1"; ctx.font = "30px 'PingFang SC', sans-serif";
+      const zhLines = wrapTextLeft(q.subtitleZh || "", x, y, maxW, 40);
+      y += zhLines * 40 + 18;
+
+      // 解析
+      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
+      ctx.fillText("💡 解析", x, y); y += 36;
+      ctx.fillStyle = "#fcd34d"; ctx.font = "28px 'PingFang SC', sans-serif";
+      wrapTextLeft(q.explain || "", x, y, maxW, 38);
+    }
+
     function render() {
       drawBackground();
       drawHeader();
-      drawImageArea();
-      drawSubtitle();
-      drawHint();
-      drawReveal();
+      drawImageCard();
+      drawRightPanel();
     }
+
     function tick() {
       state.flash += 1;
       render();
@@ -194,12 +274,13 @@
     function ensureAudioGraph() {
       if (audioCtx) return audioDest.stream;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      mediaSource = audioCtx.createMediaElementSource(audioEl);
+      const mediaSource = audioCtx.createMediaElementSource(audioEl);
       audioDest = audioCtx.createMediaStreamDestination();
       mediaSource.connect(audioDest);
       mediaSource.connect(audioCtx.destination);
       return audioDest.stream;
     }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
 
     function pickMime() {
       const list = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
@@ -227,6 +308,7 @@
       /**
        * 跑完整录制流水线并返回 { base64, mime }。
        * opts: { countdown, audioSrc, revealDelay, revealHold, answer, explain }
+       * 时间轴：ready(审题) -> listening(听音) -> countdown(作答倒计时) -> reveal(揭晓) -> end
        */
       async runFlow(opts) {
         opts = opts || {};
@@ -236,17 +318,17 @@
 
         // 等待图片就绪
         let tries = 0;
-        while ((!state.img || !state.img.complete) && tries < 100) {
+        while ((!state.img || !state.img.complete) && tries < 120) {
           await new Promise(r => setTimeout(r, 30)); tries++;
         }
+        if (audioCtx && audioCtx.state === "suspended") { try { await audioCtx.resume(); } catch (e) {} }
 
         const canvasStream = canvas.captureStream(30);
         const audioStream = ensureAudioGraph();
-        const tracks = [
+        const stream = new MediaStream([
           ...canvasStream.getVideoTracks(),
           ...audioStream.getAudioTracks(),
-        ];
-        const stream = new MediaStream(tracks);
+        ]);
         const mime = pickMime();
         const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
         const chunks = [];
@@ -266,18 +348,11 @@
 
         recorder.start(1000);
 
-        // 1) 审题展示
-        state.phase = "ready"; await sleep(1500);
+        // 阶段 1a：审题展示（不显示原文/答案）
+        state.phase = "ready"; await sleep(1400);
 
-        // 2) 倒计时
-        const cd = Math.max(0, opts.countdown || 0);
-        state.phase = "countdown";
-        for (let n = cd; n >= 1; n--) { state.countdown = n; await sleep(1000); }
-        state.countdown = 0;
-
-        // 3) 播放听力音频
-        state.phase = "playing"; state.playing = true;
-        let audioEnded = false;
+        // 阶段 1b：播放听力音频（不显示原文/答案）
+        state.phase = "listening"; state.playing = true;
         if (opts.audioSrc) {
           audioEl.src = opts.audioSrc;
           const ended = new Promise((res) => {
@@ -285,22 +360,27 @@
             audioEl.onerror = () => res(false);
           });
           try { await audioEl.play(); } catch (e) { console.warn("play failed", e); }
-          // 等待音频结束或最长 30s 兜底
-          await Promise.race([ended, sleep(30000)]);
-          audioEnded = true;
+          // 等待音频结束或最长 60s 兜底
+          await Promise.race([ended, sleep(60000)]);
         } else {
-          await sleep(2000);
+          await sleep(2500);
         }
         state.playing = false;
 
-        // 4) 揭晓前停顿
+        // 阶段 2：作答倒计时
+        const cd = Math.max(0, opts.countdown || 0);
+        state.phase = "countdown";
+        for (let n = cd; n >= 1; n--) { state.countdown = n; await sleep(1000); }
+        state.countdown = 0;
+
+        // 揭晓前短暂停顿
         await sleep((opts.revealDelay || 0));
 
-        // 5) 答案揭晓
+        // 阶段 3：答案揭晓 + 展示原文/翻译/解析
         state.revealed = true;
         state.highlight = (q.answer || "").toString().toUpperCase();
         state.phase = "reveal";
-        await sleep((opts.revealHold || 3000));
+        await sleep((opts.revealHold || 5000));
 
         recorder.stop();
         const result = await done;

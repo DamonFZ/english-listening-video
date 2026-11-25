@@ -32,10 +32,12 @@ from __future__ import annotations
 import base64
 import json
 import math
+import shutil
 import struct
+import tempfile
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -121,6 +123,56 @@ class VolcTTS:
 
         audio_bytes = self._request(final_text, params)
         out.write_bytes(audio_bytes)
+        return out
+
+    # ------------------------------------------------------------------
+    def synthesize_full(
+        self,
+        text: str,
+        output_path: str | Path,
+        level: Optional[str] = None,
+        params: Optional[TTSParams] = None,
+        read_times: Optional[int] = None,
+        pause_ms: Optional[int] = None,
+    ) -> Path:
+        """
+        合成完整听力音频：单遍合成后按 read_times 重复，遍间插入 pause_ms 静音。
+
+        相比在文本层面重复朗读，这种「音频后处理拼接」能保证两遍之间有清晰、
+        可控的停顿，听感更连贯；同时只调用一次 TTS，降低耗时与成本。
+        """
+        curriculum: Dict[str, Any] = {}
+        if level:
+            curriculum = self.cfg.load_curriculum(level)
+        if params is None:
+            params = TTSParams.from_curriculum(
+                curriculum, self.config, default_read_times=self.cfg.video.read_times
+            )
+        n = max(1, int(read_times if read_times is not None else params.read_times))
+        pause = int(pause_ms if pause_ms is not None else params.pause_ms)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        # 单遍合成（强制 read_times=1，重复由拼接完成）
+        single_params = replace(params, read_times=1)
+        with tempfile.TemporaryDirectory(prefix="elv_tts_") as td:
+            td_path = Path(td)
+            clip = td_path / "clip.mp3"
+            self.synthesize(text, clip, level=level, params=single_params)
+            if n == 1:
+                shutil.copyfile(clip, out)
+                return out
+            # 遍间静音 + 拼接：clip, silence, clip, ...
+            from src.audio_utils import concat_audio, make_silence
+
+            silence = td_path / "silence.mp3"
+            make_silence(silence, pause, sample_rate=params.sample_rate)
+            parts: list[Path] = []
+            for i in range(n):
+                parts.append(clip)
+                if i < n - 1:
+                    parts.append(silence)
+            concat_audio(parts, out, sample_rate=params.sample_rate)
         return out
 
     # ------------------------------------------------------------------

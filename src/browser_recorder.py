@@ -78,7 +78,7 @@ class BrowserRecorder:
                     "countdown": self.cfg.video.countdown_seconds,
                     "audioSrc": audio_src,
                     "revealDelay": self.cfg.video.reveal_delay_seconds * 1000,
-                    "revealHold": 3000,
+                    "revealHold": self.cfg.video.reveal_hold_seconds * 1000,
                     "answer": question.answer,
                     "explain": question.explain,
                 }

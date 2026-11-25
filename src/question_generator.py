@@ -46,13 +46,14 @@ class Question:
     title: str = ""
 
     image: str = ""  # 复合图（A/B 同图）路径或 dataURL；优先使用
-    subtitle_en: str = ""  # 英文听力题干（朗读文本）
-    subtitle_zh: str = ""  # 中文释义
+    context_en: str = ""  # 情境/题干引导句（朗读；揭晓时与题干一起作为“听力原文”展示）
+    subtitle_en: str = ""  # 核心英文听力题干（朗读文本）
+    subtitle_zh: str = ""  # 中文释义/翻译
     options: List[ChoiceOption] = field(default_factory=list)
     answer: str = ""  # "A" / "B"
-    explain: str = ""  # 英文解析
+    explain: str = ""  # 简明英文解析
 
-    audio_text: str = ""  # 默认等于 subtitle_en
+    audio_text: str = ""  # 完整朗读文本（默认 = context_en + subtitle_en）
     read_times: int = 2
     source: str = "llm"  # "llm" 或 "fallback"，便于调试
 
@@ -64,11 +65,18 @@ class Question:
 
     def to_stage_payload(self) -> Dict[str, Any]:
         """转换为 templates/image_ab_choice.html 的 window.Stage.loadQuestion 入参。"""
+        # 揭晓时展示的“英文听力原文”= 引导句 + 题干
+        transcript_en = (
+            f"{self.context_en} {self.subtitle_en}".strip()
+            if self.context_en
+            else self.subtitle_en
+        )
         payload: Dict[str, Any] = {
             "levelBadge": self.level_badge,
             "title": self.title,
             "image": self.image,
-            "subtitleEn": self.subtitle_en,
+            "contextEn": self.context_en,
+            "subtitleEn": transcript_en,
             "subtitleZh": self.subtitle_zh,
             "answer": self.answer,
             "explain": self.explain,
@@ -155,7 +163,10 @@ class QuestionGenerator:
             question = self._generate_fallback(base, curriculum, image)
 
         if not question.audio_text:
-            question.audio_text = question.subtitle_en
+            if question.context_en:
+                question.audio_text = f"{question.context_en} {question.subtitle_en}".strip()
+            else:
+                question.audio_text = question.subtitle_en
         self._validate_question(question)
 
         if save_debug:
@@ -197,8 +208,10 @@ class QuestionGenerator:
         schema = (
             'Return ONLY a JSON object with these keys: '
             '"correct_option" (value "A" or "B"), '
-            '"listening_script" (a short natural English sentence the student hears, '
-            'matching the grade level, e.g. "Which picture is red?"), '
+            '"lead_in" (a short English context/lead-in sentence read before the question, '
+            'e.g. "Look at the two pictures and listen carefully."), '
+            '"listening_script" (the core English question sentence the student hears, '
+            'matching the grade level, e.g. "How much is the bag?"), '
             '"cn_translation" (Chinese translation of the listening script), '
             '"reason" (a short English explanation why that option is correct), '
             '"title" (optional Chinese/English short title for the slide).'
@@ -246,6 +259,7 @@ class QuestionGenerator:
 
         data = self._parse_json(raw)
         base.answer = str(data.get("correct_option", "")).strip().upper()[:1]
+        base.context_en = str(data.get("lead_in", "")).strip()
         base.subtitle_en = str(data.get("listening_script", "")).strip()
         base.subtitle_zh = str(data.get("cn_translation", "")).strip()
         base.explain = str(data.get("reason", "")).strip()
@@ -287,21 +301,47 @@ class QuestionGenerator:
         """
         name = Path(image).stem if isinstance(image, (str, Path)) else "sample"
         topic = self._topic_from_filename(name)
+        # (情境引导, 核心题干, 中文翻译, 解析)
         scripts = {
-            "shopping": ("How much is the bag?", "这个包多少钱？", "Picture B shows the price."),
-            "colors": ("Which picture is red?", "哪张图片是红色的？", "Picture A is red."),
-            "numbers": ("How many apples are there?", "有多少个苹果？", "Picture B has three apples."),
-            "animal": ("Which picture shows a cat?", "哪张图片是一只猫？", "Picture A is a cat."),
+            "shopping": (
+                "Look at the two pictures and listen carefully.",
+                "How much is the bag?",
+                "这个包多少钱？",
+                "Picture B shows the price tag, so B is correct.",
+            ),
+            "colors": (
+                "Look at the two pictures and listen carefully.",
+                "Which picture is red?",
+                "哪张图片是红色的？",
+                "Picture A is red, so A is correct.",
+            ),
+            "numbers": (
+                "Look at the two pictures and listen carefully.",
+                "How many apples are there?",
+                "有多少个苹果？",
+                "Picture B has three apples, so B is correct.",
+            ),
+            "animal": (
+                "Look at the two pictures and listen carefully.",
+                "Which picture shows a cat?",
+                "哪张图片是一只猫？",
+                "Picture A is a cat, so A is correct.",
+            ),
         }
-        en, zh, reason = scripts.get(
+        lead, en, zh, reason = scripts.get(
             topic,
-            ("Listen and choose. Which one is correct?", "听一听，选一选。哪一个是正确的？",
+            ("Look at the two pictures and listen carefully.",
+             "Listen and choose. Which one is correct?",
+             "听一听，选一选。哪一个是正确的？",
              "The correct option matches the listening script."),
         )
         # 基于文件名哈希稳定决定答案 A/B
         digest = hashlib.md5(name.encode("utf-8")).hexdigest()
         answer = "A" if int(digest[0], 16) % 2 == 0 else "B"
+        # 若解析与哈希答案不一致，修正解析文案以保持自洽
+        reason = self._align_reason(reason, answer)
 
+        base.context_en = lead
         base.subtitle_en = en
         base.subtitle_zh = zh
         base.explain = reason
@@ -329,6 +369,17 @@ class QuestionGenerator:
             if key in n:
                 return "animal"
         return "general"
+
+    @staticmethod
+    def _align_reason(reason: str, answer: str) -> str:
+        """兜底样例的解析文案可能写死了 A/B，这里与哈希决定的答案对齐，保持自洽。"""
+        import re
+
+        ans = (answer or "").strip().upper()[:1] or "A"
+        # 去掉句末已有的 "so A/B is correct." 再统一追加
+        cleaned = re.sub(r"\s*[,，]?\s*so\s+[AB]\s+is\s+correct\.?\s*$", "", reason, flags=re.IGNORECASE)
+        cleaned = cleaned.rstrip(" .。")
+        return f"{cleaned}, so {ans} is correct."
 
     # ------------------------------------------------------------------
     def _save_debug(

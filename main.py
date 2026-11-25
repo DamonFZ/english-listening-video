@@ -32,7 +32,7 @@ def _check_python() -> Check:
 
 def _check_imports() -> List[Check]:
     results: List[Check] = []
-    for mod in ("dotenv", "requests", "playwright"):
+    for mod in ("dotenv", "requests", "playwright", "imageio_ffmpeg"):
         try:
             importlib.import_module(mod)
             results.append(("PASS", f"依赖可导入：{mod}"))
@@ -132,6 +132,7 @@ def run_pipeline(input_path: str, level: str | None, question_type: str | None) 
     from src.question_generator import QuestionGenerator
     from src.volc_tts import VolcTTS, VolcTTSError, generate_tone_wav
     from src.browser_recorder import BrowserRecorder
+    from src.video_encoder import MediaProcessError, transcode_to_mp4
 
     img = Path(input_path)
     if not img.is_absolute():
@@ -147,54 +148,73 @@ def run_pipeline(input_path: str, level: str | None, question_type: str | None) 
     debug_path = out_dir / "question_debug.json"
 
     print("=" * 64)
-    print("  英语听力短视频生成 - 端到端流水线")
+    print("  英语听力短视频生成 - 端到端流水线（横屏 MP4）")
     print("=" * 64)
     print(f"输入图片 : {img}")
     print(f"学段     : {target_level}")
     print(f"题型     : {target_type}")
+    print(f"分辨率   : {settings.video.width}x{settings.video.height} @ {settings.video.fps}fps")
     print(f"输出目录 : {out_dir}")
     print("-" * 64)
 
     # 1) 看图出题
-    print("[1/3] 生成听力文案与答案 ...")
+    print("[1/4] 生成听力文案与答案 ...")
     gen = QuestionGenerator()
     question = gen.generate(img, level=target_level, question_type=target_type,
                             save_debug=debug_path)
     print(f"  文案来源 : {question.source}")
-    print(f"  英文题干 : {question.subtitle_en}")
-    print(f"  中文释义 : {question.subtitle_zh}")
+    print(f"  情境引导 : {question.context_en}")
+    print(f"  英文听力稿: {question.audio_text}")
+    print(f"  中文翻译 : {question.subtitle_zh}")
     print(f"  正确答案 : {question.answer}")
     print(f"  解析     : {question.explain}")
+    print(f"  朗读遍数 : {question.read_times} 遍（遍间停顿 {question.read_times and '由学段配置'}）")
     print(f"  调试信息 : {debug_path}")
 
-    # 2) TTS 合成音频
-    print("[2/3] 合成听力音频 ...")
+    # 2) TTS 合成完整听力音频（朗读 N 遍 + 遍间静音拼接）
+    print("[2/4] 合成听力音频（多遍 + 停顿）...")
     mp3_path = out_dir / f"{img.stem}.mp3"
     wav_path = out_dir / f"{img.stem}.wav"
     final_audio = mp3_path
     try:
         tts = VolcTTS()
-        tts.synthesize(question.audio_text or question.subtitle_en, mp3_path,
-                       level=question.level)
+        tts.synthesize_full(question.audio_text, mp3_path, level=question.level)
         print(f"  火山 TTS 成功 : {mp3_path} ({mp3_path.stat().st_size} bytes)")
     except VolcTTSError as e:
         print(f"  [WARN] 火山 TTS 失败，使用本地兜底音频：{e}")
-        duration = max(2.0, min(12.0, len(question.audio_text or question.subtitle_en) * 0.06 + question.read_times * 0.8))
+        duration = max(2.0, min(15.0, len(question.audio_text or question.subtitle_en) * 0.06 + question.read_times * 1.2))
         generate_tone_wav(wav_path, duration=duration)
         final_audio = wav_path
         print(f"  兜底音频生成 : {wav_path} ({wav_path.stat().st_size} bytes)")
 
-    # 3) 浏览器录制视频
-    print("[3/3] 浏览器无头录制视频（不依赖 ffmpeg）...")
-    video_path = out_dir / f"{img.stem}.webm"
+    # 3) 浏览器无头录制 webm（音画同录）
+    print("[3/4] 浏览器无头录制（Canvas + WebAudio → webm）...")
+    webm_path = out_dir / f"{img.stem}.webm"
     rec = BrowserRecorder()
-    rec.record(question, final_audio, video_path)
-    print(f"  视频已导出 : {video_path} ({video_path.stat().st_size} bytes)")
+    rec.record(question, final_audio, webm_path)
+    print(f"  录制完成 webm : {webm_path} ({webm_path.stat().st_size} bytes)")
+
+    # 4) 转码为正式 mp4（H.264 + AAC，含完整音轨）
+    print("[4/4] 转码为正式 MP4（H.264/AAC，imageio-ffmpeg 捆绑二进制）...")
+    mp4_path = out_dir / f"{img.stem}.mp4"
+    final_video = mp4_path
+    try:
+        transcode_to_mp4(webm_path, mp4_path, fps=settings.video.fps)
+        print(f"  MP4 已生成   : {mp4_path} ({mp4_path.stat().st_size} bytes)")
+    except MediaProcessError as e:
+        print(f"  [WARN] MP4 转码失败，回退使用 webm：{e}")
+        final_video = webm_path
 
     print("-" * 64)
-    print("完成。关键产物：")
+    print("完成。本次生成的完整听力内容：")
+    print(f"  情境引导 : {question.context_en}")
+    print(f"  英文听力稿: {question.audio_text}")
+    print(f"  中文翻译 : {question.subtitle_zh}")
+    print(f"  正确答案 : {question.answer}")
+    print(f"  解析     : {question.explain}")
+    print("关键产物：")
     print(f"  音频 : {final_audio}")
-    print(f"  视频 : {video_path}")
+    print(f"  视频 : {final_video}")
     print(f"  文案 : {debug_path}")
     return 0
 

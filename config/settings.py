@@ -98,14 +98,15 @@ class VolcTTSConfig:
 
 @dataclass
 class VideoConfig:
-    """视频默认参数。"""
+    """视频默认参数（横屏 1920x1080）。"""
 
-    width: int = field(default_factory=lambda: _get_int("VIDEO_WIDTH", 1080))
-    height: int = field(default_factory=lambda: _get_int("VIDEO_HEIGHT", 1920))
+    width: int = field(default_factory=lambda: _get_int("VIDEO_WIDTH", 1920))
+    height: int = field(default_factory=lambda: _get_int("VIDEO_HEIGHT", 1080))
     fps: int = field(default_factory=lambda: _get_int("VIDEO_FPS", 30))
     read_times: int = field(default_factory=lambda: _get_int("DEFAULT_READ_TIMES", 2))
-    countdown_seconds: int = field(default_factory=lambda: _get_int("COUNTDOWN_SECONDS", 5))
-    reveal_delay_seconds: int = field(default_factory=lambda: _get_int("REVEAL_DELAY_SECONDS", 3))
+    countdown_seconds: int = field(default_factory=lambda: _get_int("COUNTDOWN_SECONDS", 3))
+    reveal_delay_seconds: int = field(default_factory=lambda: _get_int("REVEAL_DELAY_SECONDS", 1))
+    reveal_hold_seconds: int = field(default_factory=lambda: _get_int("REVEAL_HOLD_SECONDS", 6))
 
 
 @dataclass
