@@ -44,6 +44,21 @@ def _get_int(name: str, default: int) -> int:
         raise ValueError(f"环境变量 {name} 必须是整数，当前值：{val!r}") from exc
 
 
+def _is_real_value(val: str) -> bool:
+    """判断配置值是否为真实值（排除空串与模板占位符，如 your_xxx_here）。"""
+    if not val:
+        return False
+    v = val.strip().lower()
+    if not v:
+        return False
+    # 常见占位模式：your_xxx_here / xxx_here / your-xxx-here
+    if v.startswith("your_") or v.startswith("your-") or v.endswith("_here") or v.endswith("-here"):
+        return False
+    if "placeholder" in v or v in {"xxx", "todo", "changeme", "change_me"}:
+        return False
+    return True
+
+
 @dataclass
 class LLMConfig:
     """多模态大模型（素材识别 + 分学段文案生成）配置。"""
@@ -54,7 +69,7 @@ class LLMConfig:
     timeout: int = field(default_factory=lambda: _get_int("LLM_TIMEOUT", 60))
 
     def is_configured(self) -> bool:
-        return bool(self.api_key)
+        return _is_real_value(self.api_key)
 
 
 @dataclass
@@ -63,12 +78,17 @@ class VolcTTSConfig:
 
     access_key: str = field(default_factory=lambda: os.getenv("VOLC_ACCESS_KEY", ""))
     secret_key: str = field(default_factory=lambda: os.getenv("VOLC_SECRET_KEY", ""))
-    app_id: str = field(default_factory=lambda: os.getenv("VOLC_APP_ID", ""))
+    api_key: str = field(default_factory=lambda: os.getenv("VOLC_API_KEY", ""))
+    app_id: str = field(default_factory=lambda: os.getenv("VOLC_APP_ID", "") or os.getenv("VOLC_TTS_APPID", ""))
     voice_type: str = field(default_factory=lambda: os.getenv("VOLC_VOICE_TYPE", "BV001_streaming"))
     cluster: str = field(default_factory=lambda: os.getenv("VOLC_CLUSTER", "volcano_tts"))
 
     def is_configured(self) -> bool:
-        return bool(self.access_key and self.secret_key and self.app_id)
+        # 两种鉴权方式满足其一即可：AK/SK + AppID，或 API Key + AppID
+        has_app_id = _is_real_value(self.app_id)
+        has_ak_sk = _is_real_value(self.access_key) and _is_real_value(self.secret_key)
+        has_api_key = _is_real_value(self.api_key)
+        return has_app_id and (has_ak_sk or has_api_key)
 
 
 @dataclass
