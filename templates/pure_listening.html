@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, initial-scale=1.0" />
+  <title>纯听力 · 极简原图（横屏）</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 1920px; height: 1080px;
+      background: #FDF9EE; overflow: hidden;
+      font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    #stage { display: block; width: 1920px; height: 1080px; }
+  </style>
+</head>
+<body>
+  <canvas id="stage" width="1920" height="1080"></canvas>
+  <!-- 音频元素：由 Python 注入 data URI；其音轨被并入录制流 -->
+  <audio id="audio" preload="auto" crossorigin="anonymous"></audio>
+
+  <script>
+  (function () {
+    const W = 1920, H = 1080;
+    const canvas = document.getElementById("stage");
+    const ctx = canvas.getContext("2d");
+    const audioEl = document.getElementById("audio");
+
+    // 布局：标题在上，图片居中铺满，提示在下；互不遮挡
+    const TITLE_Y = 96;
+    const IMG_AREA = { x: 120, y: 150, w: W - 240, h: 800 };   // 1680 x 800
+    const HINT_Y = 1000;
+
+    const BG = "#FDF9EE";
+    const TITLE_COLOR = "#1f2937";
+    const HINT_COLOR = "#4b5563";
+
+    const state = {
+      q: null,
+      img: null,
+      phase: "idle",   // idle | ready | listening | done
+      flash: 0,
+    };
+
+    let audioCtx = null, audioDest = null;
+
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = BG;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    function drawTitle() {
+      const q = state.q || {};
+      const text = q.title || "英语听力";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = TITLE_COLOR;
+      ctx.font = "bold 66px 'PingFang SC', 'Microsoft YaHei', sans-serif";
+      ctx.fillText(text, W / 2, TITLE_Y);
+    }
+
+    function drawImage() {
+      const a = IMG_AREA;
+      // 极淡卡片底，强化原图区域但不喧宾夺主
+      roundRect(a.x - 8, a.y - 8, a.w + 16, a.h + 16, 24);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+
+      if (state.img && state.img.complete && state.img.naturalWidth) {
+        const iw = state.img.naturalWidth, ih = state.img.naturalHeight;
+        const scale = Math.min(a.w / iw, a.h / ih);
+        const dw = iw * scale, dh = ih * scale;
+        const dx = a.x + (a.w - dw) / 2, dy = a.y + (a.h - dh) / 2;
+        ctx.drawImage(state.img, dx, dy, dw, dh);
+      } else {
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "32px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("（图片加载中）", a.x + a.w / 2, a.y + a.h / 2);
+      }
+    }
+
+    function drawHint() {
+      const q = state.q || {};
+      const text = (q.hint || "听录音，选择正确的答案").trim();
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = "36px 'PingFang SC', 'Microsoft YaHei', sans-serif";
+      const tw = ctx.measureText(text).width;
+      const padX = 40, padY = 16;
+      const bx = W / 2 - tw / 2 - padX, by = HINT_Y - 30;
+      roundRect(bx, by, tw + padX * 2, 60, 30);
+      ctx.fillStyle = "rgba(31,41,55,0.06)"; ctx.fill();
+      ctx.fillStyle = HINT_COLOR;
+      ctx.fillText(text, W / 2, HINT_Y);
+
+      // 听音阶段：在提示旁画一个呼吸点，表示正在播放
+      if (state.phase === "listening") {
+        const r = 10 + Math.sin(state.flash / 6) * 4;
+        ctx.beginPath();
+        ctx.arc(W / 2 - tw / 2 - 34, HINT_Y, r, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(239,68,68,0.85)"; ctx.fill();
+      }
+    }
+
+    function render() {
+      drawBackground();
+      drawTitle();
+      drawImage();
+      drawHint();
+    }
+
+    function tick() {
+      state.flash += 1;
+      render();
+      state._raf = requestAnimationFrame(tick);
+    }
+    tick();
+
+    // ---------------- 音频图构建（与主模板一致，保证音轨并入录制流）----------------
+    function ensureAudioGraph() {
+      if (audioCtx) return audioDest.stream;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const mediaSource = audioCtx.createMediaElementSource(audioEl);
+      audioDest = audioCtx.createMediaStreamDestination();
+      mediaSource.connect(audioDest);
+      mediaSource.connect(audioCtx.destination);
+      return audioDest.stream;
+    }
+
+    function pickMime() {
+      const list = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+      for (const t of list) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+      }
+      return "";
+    }
+
+    const Stage = {
+      getState() { return state.phase; },
+
+      loadQuestion(payload) {
+        state.q = payload || {};
+        state.phase = "ready";
+        state.img = new Image();
+        state.img.crossOrigin = "anonymous";
+        return new Promise((resolve) => {
+          state.img.onload = () => { render(); resolve(true); };
+          state.img.onerror = () => { render(); resolve(false); };
+          state.img.src = (state.q && state.q.image) || "";
+        });
+      },
+
+      /**
+       * 极简纯听力流水线：展示原图 → 播放音频 → 音频播完自然收尾结束录制。
+       * 全程不展示答案、中文翻译或解析。opts.audioSrc 为音频 data URI。
+       */
+      async runFlow(opts) {
+        opts = opts || {};
+        if (audioCtx && audioCtx.state === "suspended") { try { await audioCtx.resume(); } catch (e) {} }
+
+        // 等待图片就绪
+        let tries = 0;
+        while ((!state.img || !state.img.complete) && tries < 150) {
+          await new Promise(r => setTimeout(r, 30)); tries++;
+        }
+
+        const canvasStream = canvas.captureStream(30);
+        const audioStream = ensureAudioGraph();
+        const stream = new MediaStream([
+          ...canvasStream.getVideoTracks(),
+          ...audioStream.getAudioTracks(),
+        ]);
+        const mime = pickMime();
+        const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+        const chunks = [];
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+
+        const done = new Promise((resolve) => {
+          recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: mime || "video/webm" });
+            const reader = new FileReader();
+            reader.onload = () => resolve({ base64: reader.result, mime: blob.type });
+            reader.onerror = () => resolve({ base64: "", mime: blob.type });
+            reader.readAsDataURL(blob);
+          };
+        });
+
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        recorder.start(1000);
+
+        // 短暂静态帧（让观众看清题目与图），再开始播放
+        state.phase = "ready";
+        await sleep(1000);
+
+        // 播放听力音频（不显示任何原文/答案）
+        state.phase = "listening";
+        if (opts.audioSrc) {
+          audioEl.src = opts.audioSrc;
+          const ended = new Promise((res) => {
+            audioEl.onended = () => res(true);
+            audioEl.onerror = () => res(false);
+          });
+          try { await audioEl.play(); } catch (e) { console.warn("play failed", e); }
+          await Promise.race([ended, sleep(60000)]);
+        } else {
+          await sleep(2500);
+        }
+
+        // 音频播完后自然收尾，停留约 1.2s 再结束录制
+        state.phase = "done";
+        await sleep(1200);
+
+        recorder.stop();
+        const result = await done;
+
+        stream.getTracks().forEach(t => t.stop());
+        audioEl.pause(); audioEl.removeAttribute("src");
+        return result;
+      },
+
+      reset() {
+        state.q = null; state.phase = "idle"; state.img = null;
+        audioEl.pause(); audioEl.removeAttribute("src");
+        render();
+        return true;
+      },
+    };
+
+    window.Stage = Stage;
+  })();
+  </script>
+</body>
+</html>

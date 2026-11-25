@@ -26,6 +26,10 @@ from config.settings import LLMConfig, Settings, settings
 
 ImageInput = Union[str, Path, bytes]
 
+# 题型标识（与 templates/<type>.html 一一对应）
+IMAGE_AB_CHOICE = "image_ab_choice"
+PURE_LISTENING = "pure_listening"
+
 
 @dataclass
 class ChoiceOption:
@@ -75,6 +79,7 @@ class Question:
             "levelBadge": self.level_badge,
             "title": self.title,
             "image": self.image,
+            "hint": self.extra.get("hint", ""),
             "contextEn": self.context_en,
             "subtitleEn": transcript_en,
             "subtitleZh": self.subtitle_zh,
@@ -169,6 +174,50 @@ class QuestionGenerator:
                 question.audio_text = question.subtitle_en
         self._validate_question(question)
 
+        if save_debug:
+            self._save_debug(save_debug, question, curriculum)
+        return question
+
+    # ------------------------------------------------------------------
+    def generate_pure(
+        self,
+        script: str,
+        image: ImageInput,
+        level: Optional[str] = None,
+        title: str = "英语听力：哪张图是对的？",
+        hint: str = "听录音，选择正确的答案",
+        save_debug: Optional[Union[str, Path]] = None,
+    ) -> Question:
+        """
+        纯听力模式：使用调用方指定的英文听力稿直接构造题目，不调用 LLM，
+        也不产生答案 / 中文翻译 / 解析（画面保持纯净听辨体验）。
+
+        参数：
+            script:  要朗读的英文听力稿（最终 audio_text）。
+            image:   对比图路径或字节。
+            level:   学段标识，用于加载音色等学段配置。
+            title:   画面顶部标题。
+            hint:    画面底部提示语。
+        """
+        target_level = level or self.cfg.default_level
+        curriculum = self.cfg.load_curriculum(target_level)
+        image_data_url = _image_to_data_url(image)
+
+        question = Question(
+            question_type=PURE_LISTENING,
+            level=target_level,
+            level_badge=curriculum.get("name", target_level),
+            title=title,
+            image=image_data_url,
+            subtitle_en=script,
+            audio_text=script,
+            read_times=1,
+            source="script",
+        )
+        question.extra["hint"] = hint
+        question.extra["note"] = "纯听力模式：使用指定听力稿，画面不展示答案/翻译/解析。"
+
+        self._validate_question(question)
         if save_debug:
             self._save_debug(save_debug, question, curriculum)
         return question

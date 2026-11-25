@@ -128,9 +128,16 @@ def run_init_check() -> int:
 
 
 # ===================== 端到端生成 =====================
-def run_pipeline(input_path: str, level: str | None, question_type: str | None) -> int:
-    from src.question_generator import QuestionGenerator
-    from src.volc_tts import VolcTTS, VolcTTSError, generate_tone_wav
+def run_pipeline(
+    input_path: str,
+    level: str | None,
+    question_type: str | None,
+    script: str | None = None,
+    speed: float | None = None,
+    read_times: int | None = None,
+) -> int:
+    from src.question_generator import PURE_LISTENING, QuestionGenerator
+    from src.volc_tts import TTSParams, VolcTTS, VolcTTSError, generate_tone_wav
     from src.browser_recorder import BrowserRecorder
     from src.video_encoder import MediaProcessError, transcode_to_mp4
 
@@ -142,6 +149,13 @@ def run_pipeline(input_path: str, level: str | None, question_type: str | None) 
 
     target_level = level or settings.default_level
     target_type = question_type or settings.default_type
+
+    # 纯听力模式：指定了 --script 或 --type pure_listening
+    is_pure = (target_type == PURE_LISTENING) or bool(script)
+    if is_pure:
+        target_type = PURE_LISTENING
+        if not script:
+            print("[ERROR] 纯听力模式（pure_listening）必须通过 --script 提供英文听力稿"); return 2
 
     out_dir = settings.output_dir / target_level / img.stem
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -157,29 +171,57 @@ def run_pipeline(input_path: str, level: str | None, question_type: str | None) 
     print(f"输出目录 : {out_dir}")
     print("-" * 64)
 
-    # 1) 看图出题
-    print("[1/4] 生成听力文案与答案 ...")
+    # 1) 出题（纯听力模式用指定稿件，不调用 LLM；否则看图出题）
+    print("[1/4] 生成听力文案 ...")
     gen = QuestionGenerator()
-    question = gen.generate(img, level=target_level, question_type=target_type,
-                            save_debug=debug_path)
-    print(f"  文案来源 : {question.source}")
-    print(f"  情境引导 : {question.context_en}")
-    print(f"  英文听力稿: {question.audio_text}")
-    print(f"  中文翻译 : {question.subtitle_zh}")
-    print(f"  正确答案 : {question.answer}")
-    print(f"  解析     : {question.explain}")
-    print(f"  朗读遍数 : {question.read_times} 遍（遍间停顿 {question.read_times and '由学段配置'}）")
+    if is_pure:
+        question = gen.generate_pure(script, img, level=target_level, save_debug=debug_path)
+        print(f"  模式     : 纯听力（pure_listening，画面不展示答案/翻译/解析）")
+        print(f"  英文听力稿: {question.audio_text}")
+    else:
+        question = gen.generate(img, level=target_level, question_type=target_type,
+                                save_debug=debug_path)
+        print(f"  文案来源 : {question.source}")
+        print(f"  情境引导 : {question.context_en}")
+        print(f"  英文听力稿: {question.audio_text}")
+        print(f"  中文翻译 : {question.subtitle_zh}")
+        print(f"  正确答案 : {question.answer}")
+        print(f"  解析     : {question.explain}")
     print(f"  调试信息 : {debug_path}")
 
-    # 2) TTS 合成完整听力音频（朗读 N 遍 + 遍间静音拼接）
-    print("[2/4] 合成听力音频（多遍 + 停顿）...")
+    # 2) TTS 合成听力音频（语速/遍数可被 CLI 覆盖）
+    print("[2/4] 合成听力音频 ...")
+    from src.audio_utils import probe_duration
+
     mp3_path = out_dir / f"{img.stem}.mp3"
     wav_path = out_dir / f"{img.stem}.wav"
     final_audio = mp3_path
     try:
         tts = VolcTTS()
-        tts.synthesize_full(question.audio_text, mp3_path, level=question.level)
+        if is_pure:
+            # 纯听力默认语速 0.85（实测该稿件 ≈10.2s），单遍朗读
+            speed_ratio = speed if speed is not None else 0.85
+            rt = read_times if read_times is not None else 1
+            params = TTSParams(
+                voice_type=settings.volc_tts.voice_type,
+                speed_ratio=max(0.5, min(2.0, speed_ratio)),
+                pause_ms=0, read_times=max(1, rt),
+            )
+        else:
+            curriculum = settings.load_curriculum(target_level)
+            params = TTSParams.from_curriculum(
+                curriculum, settings.volc_tts, default_read_times=settings.video.read_times
+            )
+            if speed is not None:
+                params.speed_ratio = max(0.5, min(2.0, speed))
+            if read_times is not None:
+                params.read_times = max(1, read_times)
+        tts.synthesize_full(question.audio_text, mp3_path, level=question.level, params=params)
+        dur = probe_duration(mp3_path)
         print(f"  火山 TTS 成功 : {mp3_path} ({mp3_path.stat().st_size} bytes)")
+        print(f"  语速设置 : speed_ratio={params.speed_ratio}（学段 {target_level}）")
+        print(f"  朗读遍数 : {params.read_times} 遍")
+        print(f"  实际音频时长 : {dur:.2f}s")
     except VolcTTSError as e:
         print(f"  [WARN] 火山 TTS 失败，使用本地兜底音频：{e}")
         duration = max(2.0, min(15.0, len(question.audio_text or question.subtitle_en) * 0.06 + question.read_times * 1.2))
@@ -206,12 +248,16 @@ def run_pipeline(input_path: str, level: str | None, question_type: str | None) 
         final_video = webm_path
 
     print("-" * 64)
-    print("完成。本次生成的完整听力内容：")
-    print(f"  情境引导 : {question.context_en}")
+    print("完成。本次生成内容：")
+    print(f"  模式     : {'纯听力（不展示答案/翻译/解析）' if is_pure else '看图二选一'}")
     print(f"  英文听力稿: {question.audio_text}")
-    print(f"  中文翻译 : {question.subtitle_zh}")
-    print(f"  正确答案 : {question.answer}")
-    print(f"  解析     : {question.explain}")
+    if not is_pure:
+        print(f"  情境引导 : {question.context_en}")
+        print(f"  中文翻译 : {question.subtitle_zh}")
+        print(f"  正确答案 : {question.answer}")
+        print(f"  解析     : {question.explain}")
+    from src.audio_utils import probe_duration as _pd
+    print(f"  实际音频时长 : {_pd(final_audio):.2f}s")
     print("关键产物：")
     print(f"  音频 : {final_audio}")
     print(f"  视频 : {final_video}")
@@ -225,7 +271,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--init-check", action="store_true", help="环境与配置自检")
     p.add_argument("--input", metavar="PATH", help="输入 A/B 对比图路径，触发端到端生成")
     p.add_argument("--level", metavar="LEVEL", help="学段标识，如 primary_g4")
-    p.add_argument("--type", dest="question_type", metavar="TYPE", help="题型标识，如 image_ab_choice")
+    p.add_argument("--type", dest="question_type", metavar="TYPE",
+                   help="题型标识，如 image_ab_choice / pure_listening")
+    p.add_argument("--script", metavar="TEXT",
+                   help="纯听力模式：指定英文听力稿（自动启用 pure_listening，画面不展示答案/翻译）")
+    p.add_argument("--speed", type=float, metavar="RATIO",
+                   help="覆盖语速倍率（如 0.85），范围 0.5~2.0")
+    p.add_argument("--read-times", type=int, dest="read_times", metavar="N",
+                   help="覆盖朗读遍数")
     return p
 
 
@@ -234,9 +287,14 @@ def main(argv=None) -> int:
     if args.init_check:
         return run_init_check()
     if args.input:
-        return run_pipeline(args.input, args.level, args.question_type)
+        return run_pipeline(
+            args.input, args.level, args.question_type,
+            script=args.script, speed=args.speed, read_times=args.read_times,
+        )
     build_parser().print_help()
     print("\n示例：python main.py --input input/test_ab_bag.jpeg --level primary_g4")
+    print("纯听力：python main.py --input input/xxx.jpeg --level primary_g4 --type pure_listening "
+          "--script \"Look at...\"")
     return 0
 
 

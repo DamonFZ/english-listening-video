@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -94,3 +95,26 @@ def concat_audio(parts: Sequence[PathLike], out_path: PathLike,
         except OSError:
             pass
     return out
+
+
+# ----------------------------------------------------------------------
+def probe_duration(path: PathLike) -> float:
+    """
+    探测音频/视频时长（秒），用捆绑 ffmpeg 解析 stderr 中的 Duration 行，
+    不依赖系统 ffprobe。无法识别时返回 0.0。
+    """
+    src = Path(path)
+    if not src.exists():
+        return 0.0
+    cmd = [get_ffmpeg_exe(), "-hide_banner", "-i", str(src)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return 0.0
+    # ffmpeg 会把输入信息打到 stderr：Duration: 00:00:10.20, start: 0.000000, bitrate: ...
+    text = (proc.stderr or "") + (proc.stdout or "")
+    m = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", text)
+    if not m:
+        return 0.0
+    h, mm, ss = m.groups()
+    return int(h) * 3600 + int(mm) * 60 + float(ss)
