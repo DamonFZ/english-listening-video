@@ -1,32 +1,26 @@
 """
-Playwright 浏览器无头录制模块（骨架）。
+Playwright 浏览器无头录制模块（真实实现，不依赖本地 FFmpeg）。
 
-职责：
-1. 根据 question_type 加载对应 HTML 模板（templates/<question_type>.html）。
-2. 启动无头 Chromium，设置 viewport 为竖屏分辨率（默认 1080x1920）。
-3. 通过 window.Stage 接口驱动舞台状态切换：loadQuestion -> countdown -> playAudio -> revealAnswer。
-4. 同步音频与画面状态，录制页面生成视频文件（不依赖本地 FFmpeg）。
-5. 导出 mp4/webm 到 output 目录。
-
-当前阶段：定义流程骨架与关键 TODO，暂不实现完整录制细节。
-
-录制方案说明（Playwright 两种可行路线，后续二选一或结合）：
-- 路线 A：Playwright 内置 record_video（context.new_context(record_video_dir=..., record_video_size=...)），
-  导出 webm，再用浏览器 MediaRecorder 或服务端转封装。注意：内置录制不包含音频，需另行处理音轨。
-- 路线 B：使用 Chrome DevTools Protocol (CDP) 的 Page.startScreencast 逐帧采集 + Web Audio 采集，
-  自行合成（纯 Python 合成较复杂）；或在页面内用 MediaRecorder 录制 canvas+audio stream 并通过
-  page.evaluate 传回，导出 webm。
-- 音频同步：优先在页面内用 <audio> 播放，并在录制的 media stream 中纳入 audio track；
-  或在 Python 侧用 ffmpeg（不允许本地 FFmpeg 时排除）。本项目约定不依赖本地 FFmpeg，
-  故采用浏览器端 MediaRecorder 录制含音轨的 webm 路线。
+录制方案：浏览器端 MediaRecorder 采集 canvas.captureStream 视频轨 + WebAudio 音频轨，
+合成含音轨的 webm，再把 base64 回传 Python 写入文件。全程不调用系统 ffmpeg。
 """
 from __future__ import annotations
 
+import base64
+import json
+import mimetypes
 from pathlib import Path
 from typing import Optional
 
 from config.settings import Settings, settings
 from src.question_generator import Question
+
+# 系统 Chrome / Chromium 兜底路径（当 Playwright 捆绑内核不可用时使用）
+FALLBACK_BROWSERS = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+]
 
 
 class BrowserRecorder:
@@ -42,60 +36,100 @@ class BrowserRecorder:
         audio_path: str | Path,
         output_video_path: str | Path,
     ) -> Path:
-        """
-        录制一道题的视频，返回输出视频路径。
-
-        流程：
-            1. 校验模板存在：self.cfg.template_path(question.question_type)
-            2. 启动无头 Chromium，viewport = (video.width, video.height)
-            3. 打开模板 HTML（file:// 绝对路径）
-            4. page.evaluate("window.Stage.loadQuestion(...)") 注入题目数据
-            5. 开始录制（见模块顶部方案说明）
-            6. await page.evaluate("window.Stage.startCountdown(n)")
-            7. 注入音频并播放：设置 audio.src，或调用 window.Stage.playAudio(src)
-            8. 等待 reveal_delay 后 window.Stage.revealAnswer(...)
-            9. 停止录制，保存到 output_video_path
-            10. 关闭浏览器
-
-        TODO（真实实现）：
-        - 录制方案选型与实现（建议路线 B：页面内 MediaRecorder 录制 canvas+audio）。
-        - 音画同步：确保 audio.play() 与录制 start 时间对齐，必要时用 performance.now() 打点。
-        - 等待音频播放结束：监听 window.Stage 状态回调或 audio 'ended' 事件。
-        - 错误处理与超时：页面加载、音频加载失败时的兜底。
-        - 清理临时文件。
-        """
+        """录制一道题的视频，返回输出视频路径（.webm）。"""
         template_path = self.cfg.template_path(question.question_type)
         if not template_path.exists():
             raise FileNotFoundError(f"题型模板不存在：{template_path}")
 
+        audio_src = self._audio_to_data_url(audio_path)
         out = Path(output_video_path)
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        # ---- 占位：真实录制逻辑待接入 ----
-        # TODO: 接入 Playwright（from playwright.sync_api import sync_playwright）
-        # 此处仅创建空文件占位，避免流程中断（正式接入后删除）。
-        if not out.exists():
-            out.write_bytes(b"")
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            executable = self._resolve_executable(p)
+            browser = p.chromium.launch(
+                executable_path=executable,
+                headless=True,
+                args=[
+                    "--autoplay-policy=no-user-gesture-required",
+                    "--use-fake-ui-for-media-stream",
+                    "--enable-features=MediaRecorder",
+                    "--disable-dev-shm-usage",
+                ],
+            )
+            try:
+                context = browser.new_context(
+                    viewport={"width": self.cfg.video.width, "height": self.cfg.video.height},
+                    device_scale_factor=1,
+                    record_video_dir=None,  # 不使用 Playwright 内置录制（无音频），用页面内 MediaRecorder
+                )
+                page = context.new_page()
+                page.set_default_timeout(120000)
+                page.goto(template_path.resolve().as_uri())
+
+                payload = question.to_stage_payload()
+                page.evaluate(
+                    "async (p) => { await window.Stage.loadQuestion(p); }", payload
+                )
+
+                opts = {
+                    "countdown": self.cfg.video.countdown_seconds,
+                    "audioSrc": audio_src,
+                    "revealDelay": self.cfg.video.reveal_delay_seconds * 1000,
+                    "revealHold": 3000,
+                    "answer": question.answer,
+                    "explain": question.explain,
+                }
+                result = page.evaluate(
+                    "async (o) => { return await window.Stage.runFlow(o); }", opts
+                )
+
+                data_url = (result or {}).get("base64", "")
+                if not data_url:
+                    raise RuntimeError("浏览器录制未返回视频数据（MediaRecorder 可能未成功）")
+                video_bytes = self._decode_data_url(data_url)
+                if len(video_bytes) < 1024:
+                    raise RuntimeError(f"录制产物过小（{len(video_bytes)} bytes），疑似录制失败")
+                out.write_bytes(video_bytes)
+                context.close()
+            finally:
+                browser.close()
 
         return out
 
     # ------------------------------------------------------------------
-    def _stage_run_flow_code(self, question: Question, audio_src: str) -> str:
-        """
-        生成在浏览器端执行的 JS：调用 window.Stage.runFlow 完成单题流水线。
-        返回 JS 字符串，供 page.evaluate 使用。
-        （分步控制录制起止时，也可拆成多次 evaluate。）
-        """
-        payload = question.to_stage_payload()
-        import json
+    @staticmethod
+    def _resolve_executable(p) -> Optional[str]:
+        """优先使用 Playwright 捆绑 Chromium；不存在则回退系统 Chrome。"""
+        try:
+            bundled = p.chromium.executable_path
+            if bundled and Path(bundled).exists():
+                return bundled
+        except Exception:
+            pass
+        for cand in FALLBACK_BROWSERS:
+            if Path(cand).exists():
+                return cand
+        return None  # 让 Playwright 自行尝试（可能报错）
 
-        return (
-            "window.Stage.loadQuestion(" + json.dumps(payload, ensure_ascii=False) + ");"
-            " return window.Stage.runFlow({"
-            f"countdown: {self.cfg.video.countdown_seconds},"
-            f" audioSrc: {json.dumps(audio_src, ensure_ascii=False)},"
-            f" revealDelay: {self.cfg.video.reveal_delay_seconds * 1000},"
-            f" answer: {json.dumps(question.answer, ensure_ascii=False)},"
-            f" explain: {json.dumps(question.explain, ensure_ascii=False)}"
-            " });"
-        )
+    @staticmethod
+    def _audio_to_data_url(audio_path: str | Path) -> str:
+        p = Path(audio_path)
+        if not p.exists() or p.stat().st_size == 0:
+            return ""
+        mime = mimetypes.guess_type(str(p))[0] or "audio/mpeg"
+        b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+    @staticmethod
+    def _decode_data_url(data_url: str) -> bytes:
+        # data:<mime>;base64,<payload>  —— 注意 mime 可能含逗号（如 codecs=vp9,opus），
+        # 必须按 ";base64," 切分，不能按第一个逗号切。
+        sep = ";base64,"
+        idx = data_url.find(sep)
+        payload = data_url[idx + len(sep):] if idx != -1 else data_url
+        payload = "".join(payload.split())  # 去空白
+        payload += "=" * (-len(payload) % 4)  # 补 padding
+        return base64.b64decode(payload)
