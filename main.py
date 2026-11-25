@@ -189,13 +189,16 @@ def run_pipeline(
         print(f"  解析     : {question.explain}")
     print(f"  调试信息 : {debug_path}")
 
-    # 2) TTS 合成听力音频（语速/遍数可被 CLI 覆盖）
+    # 2) TTS 合成听力音频（语速/遍数可被 CLI 覆盖），再按需拼接开场提示音
     print("[2/4] 合成听力音频 ...")
-    from src.audio_utils import probe_duration
+    from src.audio_utils import probe_duration, prepend_intro_sfx
 
-    mp3_path = out_dir / f"{img.stem}.mp3"
-    wav_path = out_dir / f"{img.stem}.wav"
-    final_audio = mp3_path
+    stem = img.stem
+    intro_cfg = settings.intro_sfx
+    intro_on = intro_cfg.is_available()
+    final_audio = out_dir / f"{stem}.mp3"        # 最终用于录制的音频（含提示音时为拼接结果）
+    speech_audio: Path | None = None             # 仅语音（不含提示音），用于时长统计/拼接源
+
     try:
         tts = VolcTTS()
         if is_pure:
@@ -216,18 +219,39 @@ def run_pipeline(
                 params.speed_ratio = max(0.5, min(2.0, speed))
             if read_times is not None:
                 params.read_times = max(1, read_times)
-        tts.synthesize_full(question.audio_text, mp3_path, level=question.level, params=params)
-        dur = probe_duration(mp3_path)
-        print(f"  火山 TTS 成功 : {mp3_path} ({mp3_path.stat().st_size} bytes)")
+        # 启用提示音时先把纯语音写到中间文件，再拼接；否则直接写入最终文件
+        speech_audio = (out_dir / f"{stem}_speech.mp3") if intro_on else final_audio
+        tts.synthesize_full(question.audio_text, speech_audio, level=question.level, params=params)
+        print(f"  火山 TTS 成功 : {speech_audio} ({speech_audio.stat().st_size} bytes)")
         print(f"  语速设置 : speed_ratio={params.speed_ratio}（学段 {target_level}）")
         print(f"  朗读遍数 : {params.read_times} 遍")
-        print(f"  实际音频时长 : {dur:.2f}s")
     except VolcTTSError as e:
         print(f"  [WARN] 火山 TTS 失败，使用本地兜底音频：{e}")
+        wav_path = out_dir / f"{stem}.wav"
         duration = max(2.0, min(15.0, len(question.audio_text or question.subtitle_en) * 0.06 + question.read_times * 1.2))
         generate_tone_wav(wav_path, duration=duration)
-        final_audio = wav_path
+        speech_audio = wav_path
+        if not intro_on:
+            final_audio = wav_path
         print(f"  兜底音频生成 : {wav_path} ({wav_path.stat().st_size} bytes)")
+
+    # 2b) 拼接开场提示音：[intro_ding] -> [pause] -> [语音]，统一采样率/声道/响度
+    intro_dur = 0.0
+    if intro_on:
+        prepend_intro_sfx(
+            speech_audio, final_audio,
+            intro_cfg.resolved_path, pause_sec=intro_cfg.pause_sec,
+        )
+        intro_dur = probe_duration(intro_cfg.resolved_path)
+        print(f"  开场提示音 : 已启用 {intro_cfg.resolved_path.name}（{intro_dur:.2f}s）"
+              f" + 停顿 {intro_cfg.pause_sec:.2f}s 后开始朗读")
+    else:
+        print(f"  开场提示音 : 未启用（ENABLE_INTRO_SFX=False 或提示音文件不存在）")
+
+    speech_dur = probe_duration(speech_audio) if speech_audio else 0.0
+    total_dur = probe_duration(final_audio)
+    print(f"  语音时长   : {speech_dur:.2f}s")
+    print(f"  总音频时长 : {total_dur:.2f}s（提示音 + 停顿 + 语音）")
 
     # 3) 浏览器无头录制 webm（音画同录）
     print("[3/4] 浏览器无头录制（Canvas + WebAudio → webm）...")

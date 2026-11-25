@@ -44,6 +44,16 @@ def _get_int(name: str, default: int) -> int:
         raise ValueError(f"环境变量 {name} 必须是整数，当前值：{val!r}") from exc
 
 
+def _get_float(name: str, default: float) -> float:
+    val = os.getenv(name)
+    if val is None or val.strip() == "":
+        return default
+    try:
+        return float(val)
+    except ValueError as exc:  # pragma: no cover - 配置错误时给出明确提示
+        raise ValueError(f"环境变量 {name} 必须是数字，当前值：{val!r}") from exc
+
+
 def _is_real_value(val: str) -> bool:
     """判断配置值是否为真实值（排除空串与模板占位符，如 your_xxx_here）。"""
     if not val:
@@ -110,6 +120,24 @@ class VideoConfig:
 
 
 @dataclass
+class IntroSfxConfig:
+    """全局开场提示音配置：朗读前自动拼接「叮」+ 停顿，模拟真实考场节奏。"""
+
+    enable: bool = field(default_factory=lambda: _get_bool("ENABLE_INTRO_SFX", True))
+    path: str = field(default_factory=lambda: os.getenv("INTRO_SFX_PATH", "assets/sfx/intro_ding.wav"))
+    pause_sec: float = field(default_factory=lambda: _get_float("INTRO_SFX_PAUSE_SEC", 0.5))
+
+    @property
+    def resolved_path(self) -> Path:
+        """返回提示音绝对路径（相对路径基于项目根解析）。"""
+        p = Path(self.path)
+        return p if p.is_absolute() else ROOT_DIR / p
+
+    def is_available(self) -> bool:
+        return bool(self.enable) and self.resolved_path.exists()
+
+
+@dataclass
 class Settings:
     """全局设置聚合。"""
 
@@ -121,6 +149,7 @@ class Settings:
     llm: LLMConfig = field(default_factory=LLMConfig)
     volc_tts: VolcTTSConfig = field(default_factory=VolcTTSConfig)
     video: VideoConfig = field(default_factory=VideoConfig)
+    intro_sfx: IntroSfxConfig = field(default_factory=IntroSfxConfig)
 
     # ---------- 校验 ----------
     def validate(self) -> List[str]:
