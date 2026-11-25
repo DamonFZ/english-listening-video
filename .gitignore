@@ -57,3 +57,7 @@ frames/
 screenshots/
 *.tmp
 *.log
+
+# ===== 项目音效素材（候选提示音需入库供试听挑选，不被 *.wav 忽略）=====
+!assets/sfx/
+!assets/sfx/**/*.wav
