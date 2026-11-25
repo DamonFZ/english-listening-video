@@ -33,9 +33,9 @@ config/curriculum/<level>.json
   "stage": "primary",         // primary | junior | senior，便于按学段批量处理
   "grade": 4,
   "tts": {
-    "voice_type": "BV001_streaming",  // 可覆盖 .env 中的默认音色
-    "speed_ratio": 0.9,               // 语速倍率（1.0 为标准）
-    "pause_ms": 600,                  // 句间停顿（毫秒）
+    "voice_type": "en_female_female_tutor_ms-jenny_uranus_bigtts",  // 可覆盖 .env 中的默认音色（必须是 seed-tts-2.0 兼容音色）
+    "speed_ratio": 0.9,               // 语速倍率（1.0 为标准，V3 换算为 speech_rate）
+    "pause_ms": 600,                  // 句间停顿（毫秒，写入 additions.silence_duration）
     "read_times": 2                   // 该学段默认朗读遍数
   },
   "units": [ { "id": "...", "title": "...", "topic": "...", "vocabulary": [...], "sentences": [...] } ],

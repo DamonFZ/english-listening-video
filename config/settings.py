@@ -74,21 +74,26 @@ class LLMConfig:
 
 @dataclass
 class VolcTTSConfig:
-    """火山引擎 TTS 配置（默认值可被学段配置覆盖）。"""
+    """火山引擎 TTS 配置（V3 seed-tts-2.0 大模型接口，默认值可被学段配置覆盖）。"""
 
+    # V3 新版鉴权：API Key + Resource-Id（语音技术控制台 -> 大模型语音合成 -> API Key）
+    api_key: str = field(default_factory=lambda: os.getenv("VOLC_API_KEY", ""))
+    resource_id: str = field(default_factory=lambda: os.getenv("VOLC_RESOURCE_ID", "seed-tts-2.0"))
+    # V3 兼容音色（必须是 seed-tts-2.0 音色列表中的发音人）
+    voice_type: str = field(
+        default_factory=lambda: os.getenv(
+            "VOLC_VOICE_TYPE", "zh_female_yingyujiaoxue_uranus_bigtts"
+        )
+    )
+    # 以下字段为旧版 V1 鉴权遗留，V3 已废弃，仅保留读取以兼容旧 .env
     access_key: str = field(default_factory=lambda: os.getenv("VOLC_ACCESS_KEY", ""))
     secret_key: str = field(default_factory=lambda: os.getenv("VOLC_SECRET_KEY", ""))
-    api_key: str = field(default_factory=lambda: os.getenv("VOLC_API_KEY", ""))
     app_id: str = field(default_factory=lambda: os.getenv("VOLC_APP_ID", "") or os.getenv("VOLC_TTS_APPID", ""))
-    voice_type: str = field(default_factory=lambda: os.getenv("VOLC_VOICE_TYPE", "BV001_streaming"))
     cluster: str = field(default_factory=lambda: os.getenv("VOLC_CLUSTER", "volcano_tts"))
 
     def is_configured(self) -> bool:
-        # 两种鉴权方式满足其一即可：AK/SK + AppID，或 API Key + AppID
-        has_app_id = _is_real_value(self.app_id)
-        has_ak_sk = _is_real_value(self.access_key) and _is_real_value(self.secret_key)
-        has_api_key = _is_real_value(self.api_key)
-        return has_app_id and (has_ak_sk or has_api_key)
+        # V3 只需要 API Key + Resource-Id；旧版 APPID/Token 鉴权已废弃
+        return _is_real_value(self.api_key) and _is_real_value(self.resource_id)
 
 
 @dataclass

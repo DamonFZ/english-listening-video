@@ -5,11 +5,11 @@
   "grade": 4,
   "description": "首期默认学段：小学四年级英语听力，主打“看图二选一”题型。后续可按同样结构扩展到其他年级。",
   "tts": {
-    "voice_type": "BV001_streaming",
+    "voice_type": "en_female_female_tutor_ms-jenny_uranus_bigtts",
     "speed_ratio": 0.9,
     "pause_ms": 600,
     "read_times": 2,
-    "note": "语速倍率与停顿时长按学段匹配：小学阶段语速略慢、停顿略长，便于跟读与理解。"
+    "note": "V3 seed-tts-2.0 兼容音色；语速倍率与停顿时长按学段匹配：小学阶段语速略慢、停顿略长，便于跟读与理解。"
   },
   "units": [
     {
