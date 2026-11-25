@@ -7,7 +7,7 @@
   <style>
     html, body {
       margin: 0; padding: 0; width: 1920px; height: 1080px;
-      background: #0f172a; overflow: hidden;
+      background: #ffffff; overflow: hidden;
       font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     }
     #stage { display: block; width: 1920px; height: 1080px; }
@@ -60,11 +60,7 @@
     }
 
     function drawBackground() {
-      const g = ctx.createLinearGradient(0, 0, W, H);
-      g.addColorStop(0, "#1e3a8a");
-      g.addColorStop(0.55, "#0f172a");
-      g.addColorStop(1, "#020617");
-      ctx.fillStyle = g;
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, W, H);
     }
 
@@ -80,13 +76,13 @@
         roundRect(cursorX, (HEADER_H - bh) / 2, bw, bh, 26);
         ctx.fillStyle = "rgba(250,204,21,0.16)"; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = "rgba(250,204,21,0.6)"; ctx.stroke();
-        ctx.fillStyle = "#fde68a"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        ctx.fillStyle = "#b45309"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
         ctx.fillText(badge, cursorX + 28, HEADER_H / 2);
         cursorX += bw + 20;
       }
       // 标题
       ctx.font = "bold 38px 'PingFang SC', sans-serif";
-      ctx.fillStyle = "#f8fafc"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+      ctx.fillStyle = "#0f172a"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
       ctx.fillText(q.title || "看图二选一 · 英语听力", cursorX, HEADER_H / 2);
 
       // 阶段提示（右）
@@ -99,7 +95,7 @@
         roundRect(bx, (HEADER_H - bh) / 2, bw, bh, 24);
         ctx.fillStyle = state.phase === "reveal" ? "rgba(34,197,94,0.2)" : "rgba(56,189,248,0.18)";
         ctx.fill();
-        ctx.fillStyle = state.phase === "reveal" ? "#4ade80" : "#7dd3fc";
+        ctx.fillStyle = state.phase === "reveal" ? "#15803d" : "#0369a1";
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(phaseText, bx + bw / 2, HEADER_H / 2);
       }
@@ -108,8 +104,8 @@
     function drawImageCard() {
       // 卡片底
       roundRect(IMG.x, IMG.y, IMG.w, IMG.h, 28);
-      ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.stroke();
+      ctx.fillStyle = "rgba(15,23,42,0.03)"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(15,23,42,0.12)"; ctx.stroke();
 
       if (state.img && state.img.complete && state.img.naturalWidth) {
         const iw = state.img.naturalWidth, ih = state.img.naturalHeight;
@@ -118,7 +114,7 @@
         const dx = IMG.x + (IMG.w - dw) / 2, dy = IMG.y + (IMG.h - dh) / 2;
         ctx.drawImage(state.img, dx, dy, dw, dh);
       } else {
-        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fillStyle = "rgba(15,23,42,0.4)";
         ctx.font = "32px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText("（图片加载中）", IMG.x + IMG.w / 2, IMG.y + IMG.h / 2);
       }
@@ -132,8 +128,9 @@
       const correct = (state.highlight === letter);
       const r = 56;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = correct ? "#22c55e" : "rgba(255,255,255,0.92)";
+      ctx.fillStyle = correct ? "#22c55e" : "#f1f5f9";
       ctx.fill();
+      if (!correct) { ctx.lineWidth = 3; ctx.strokeStyle = "#cbd5e1"; ctx.stroke(); }
       if (correct) {
         ctx.lineWidth = 8; ctx.strokeStyle = "rgba(34,197,94,0.55)";
         ctx.beginPath(); ctx.arc(cx, cy, r + 12 + Math.sin(state.flash / 4) * 6, 0, Math.PI * 2); ctx.stroke();
@@ -162,8 +159,8 @@
     function drawRightPanel() {
       // 右侧面板底
       roundRect(RIGHT.x, RIGHT.y, RIGHT.w, RIGHT.h, 28);
-      ctx.fillStyle = "rgba(255,255,255,0.04)"; ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.stroke();
+      ctx.fillStyle = "rgba(15,23,42,0.03)"; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(15,23,42,0.10)"; ctx.stroke();
 
       drawPhaseHint();
       if (state.revealed) drawTranscript();
@@ -176,31 +173,31 @@
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
 
       if (state.phase === "ready") {
-        ctx.fillStyle = "#fbbf24"; ctx.font = "bold 42px 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#b45309"; ctx.font = "bold 42px 'PingFang SC', sans-serif";
         ctx.fillText("请看题目，准备听音", cx, cy);
       } else if (state.phase === "listening") {
         const dots = ".".repeat((Math.floor(state.flash / 8) % 3) + 1);
-        ctx.fillStyle = "#38bdf8"; ctx.font = "bold 46px 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#0369a1"; ctx.font = "bold 46px 'PingFang SC', sans-serif";
         ctx.fillText("正在播放听力" + dots, cx, cy - 36);
-        ctx.fillStyle = "#cbd5e1"; ctx.font = "30px 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#475569"; ctx.font = "30px 'PingFang SC', sans-serif";
         ctx.fillText("请仔细听，选择 A 或 B", cx, cy + 30);
         // 声波动画
         const bars = 5;
         for (let i = 0; i < bars; i++) {
           const bh = 18 + Math.abs(Math.sin(state.flash / 5 + i)) * 34;
           const bx = cx - (bars * 26) / 2 + i * 26;
-          ctx.fillStyle = "rgba(56,189,248,0.7)";
+          ctx.fillStyle = "rgba(14,165,233,0.85)";
           roundRect(bx, cy + 70 - bh / 2, 14, bh, 7); ctx.fill();
         }
       } else if (state.phase === "countdown" && state.countdown > 0) {
-        ctx.fillStyle = "#fbbf24"; ctx.font = "bold 34px 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#b45309"; ctx.font = "bold 34px 'PingFang SC', sans-serif";
         ctx.fillText("思考并作答", cx, cy - 56);
-        ctx.fillStyle = "#f87171"; ctx.font = "bold 150px sans-serif";
+        ctx.fillStyle = "#dc2626"; ctx.font = "bold 150px sans-serif";
         ctx.fillText(String(state.countdown), cx, cy + 40);
       } else if (state.phase === "reveal") {
-        ctx.fillStyle = "#4ade80"; ctx.font = "bold 44px 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#15803d"; ctx.font = "bold 44px 'PingFang SC', sans-serif";
         ctx.fillText("答案揭晓", cx, cy - 24);
-        ctx.fillStyle = "#f8fafc"; ctx.font = "bold 64px sans-serif";
+        ctx.fillStyle = "#0f172a"; ctx.font = "bold 64px sans-serif";
         ctx.fillText("正确答案：" + ((state.q && state.q.answer) || "?"), cx, cy + 48);
       }
     }
@@ -210,7 +207,7 @@
       const cx = TRANS.x + TRANS.w / 2;
       const cy = TRANS.y + 40;
       ctx.textAlign = "center"; ctx.textBaseline = "top";
-      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "28px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#64748b"; ctx.font = "28px 'PingFang SC', sans-serif";
       ctx.fillText("请在听到问题后选择：", cx, cy);
       // 两个选项按钮
       const bw = 220, bh = 84, gap = 40;
@@ -219,9 +216,9 @@
       const y = cy + 56;
       for (const letter of ["A", "B"]) {
         roundRect(x, y, bw, bh, 18);
-        ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.stroke();
-        ctx.fillStyle = "#f8fafc"; ctx.font = "bold 40px sans-serif";
+        ctx.fillStyle = "rgba(15,23,42,0.04)"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(15,23,42,0.15)"; ctx.stroke();
+        ctx.fillStyle = "#0f172a"; ctx.font = "bold 40px sans-serif";
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText("选项 " + letter, x + bw / 2, y + bh / 2);
         x += bw + gap;
@@ -235,24 +232,24 @@
       let y = TRANS.y + 24;
 
       // 听力原文（英文）
-      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#64748b"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
       ctx.textAlign = "left"; ctx.textBaseline = "top";
       ctx.fillText("📖 听力原文", x, y); y += 36;
-      ctx.fillStyle = "#f8fafc"; ctx.font = "34px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#0f172a"; ctx.font = "34px 'PingFang SC', sans-serif";
       const enLines = wrapTextLeft(q.subtitleEn || "", x, y, maxW, 44);
       y += enLines * 44 + 18;
 
       // 中文翻译
-      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#64748b"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
       ctx.fillText("🀄 中文翻译", x, y); y += 36;
-      ctx.fillStyle = "#cbd5e1"; ctx.font = "30px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#334155"; ctx.font = "30px 'PingFang SC', sans-serif";
       const zhLines = wrapTextLeft(q.subtitleZh || "", x, y, maxW, 40);
       y += zhLines * 40 + 18;
 
       // 解析
-      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#64748b"; ctx.font = "bold 24px 'PingFang SC', sans-serif";
       ctx.fillText("💡 解析", x, y); y += 36;
-      ctx.fillStyle = "#fcd34d"; ctx.font = "28px 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#b45309"; ctx.font = "28px 'PingFang SC', sans-serif";
       wrapTextLeft(q.explain || "", x, y, maxW, 38);
     }
 
