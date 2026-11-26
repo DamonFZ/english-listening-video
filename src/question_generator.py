@@ -67,8 +67,13 @@ class Question:
         d = asdict(self)
         return d
 
-    def to_stage_payload(self) -> Dict[str, Any]:
-        """转换为 templates/image_ab_choice.html 的 window.Stage.loadQuestion 入参。"""
+    def to_stage_payload(self, orientation: str = "landscape") -> Dict[str, Any]:
+        """转换为模板 window.Stage.loadQuestion 入参。
+
+        参数:
+            orientation: 当前画幅方向 "landscape" 或 "portrait"，
+                         供模板决定是左右并排单一复合图还是上 A 下 B 独立图。
+        """
         # 揭晓时展示的“英文听力原文”= 引导句 + 题干
         transcript_en = (
             f"{self.context_en} {self.subtitle_en}".strip()
@@ -85,6 +90,7 @@ class Question:
             "subtitleZh": self.subtitle_zh,
             "answer": self.answer,
             "explain": self.explain,
+            "orientation": orientation,
         }
         for opt in self.options:
             if opt.key.upper() == "A":
@@ -183,6 +189,7 @@ class QuestionGenerator:
         self,
         script: str,
         image: ImageInput,
+        image_b: Optional[ImageInput] = None,
         level: Optional[str] = None,
         title: str = "英语听力：哪张图是对的？",
         hint: str = "听录音，选择正确的答案",
@@ -194,14 +201,16 @@ class QuestionGenerator:
 
         参数：
             script:  要朗读的英文听力稿（最终 audio_text）。
-            image:   对比图路径或字节。
+            image:   对比图路径或字节；竖屏模式下为图 A（左卡原图）。
+            image_b: 可选，图 B 路径或字节（竖屏模式传入，自动把 A/B 独立图填进 options）。
             level:   学段标识，用于加载音色等学段配置。
             title:   画面顶部标题。
-            hint:    画面底部提示语。
+            hint:    画面底部提示语（默认不展示，但保留以供未来切换）。
         """
         target_level = level or self.cfg.default_level
         curriculum = self.cfg.load_curriculum(target_level)
         image_data_url = _image_to_data_url(image)
+        image_b_data_url = _image_to_data_url(image_b) if image_b else ""
 
         question = Question(
             question_type=PURE_LISTENING,
@@ -214,6 +223,12 @@ class QuestionGenerator:
             read_times=1,
             source="script",
         )
+        # 如果提供了独立的图 B，则把两张独立图存进 options，供竖屏模板上 A 下 B 排版使用
+        if image_b_data_url:
+            question.options = [
+                ChoiceOption(key="A", image=image_data_url),
+                ChoiceOption(key="B", image=image_b_data_url),
+            ]
         question.extra["hint"] = hint
         question.extra["note"] = "纯听力模式：使用指定听力稿，画面不展示答案/翻译/解析。"
 

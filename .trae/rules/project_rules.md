@@ -30,3 +30,13 @@
 1. 不调用外部视觉识图大模型 API，直接接收外部传入的英文听力稿，**严禁回退使用** `"Listen and choose a picture."` 等占位文本。
 2. 使用火山引擎 TTS 按对应学段（默认 `primary_g4`）清晰自然朗读，正文时长控制在 10 秒左右（约 8～12 秒）。
 3. 默认在每条听力正文前自动拼接开场提示音 `assets/sfx/intro_ding.wav` + `0.5` 秒静音停顿（拼接前必须统一采样率、声道与编码格式，确保不变调、无爆音、结尾不截断）。
+
+## 五、横竖屏配置规范（二选一，不支持 both 模式）
+
+1. **画幅预设文件** `config/layouts.json`（Git 入库，全设备共享），内含 `landscape`（`1920x1080`）与 `portrait`（`1080x1920`）两套预设，包含宽高、标题字号与 Y 位置、图片区域、竖屏底部安全区（`220px` 纯白留白，避开视频号/抖音底栏）等。
+2. **本机独立开关**：`.env` 中的 `VIDEO_ORIENTATION=landscape`（或 `portrait`），非法值明确报错提示可选范围；**不同电脑可独立设置互不影响**。
+3. **CLI 临时覆盖**：`python main.py --orientation portrait`（或 `landscape`），优先级：CLI 参数 > `.env` > 默认 `landscape`。
+4. **竖屏自动切图**：保持 `input/` 下横向 A/B 对比图（16:9）不变，竖屏模式由 `src/image_utils.split_ab_image_white_gap()` 自动沿横向中部（原宽 35%～65% 区间）最宽的纯白纵向列带中心切分为左右两张独立卡片，分别裁白边并补 `10px` 安全内边距，保证左上 A/B 圆形徽标与圆角完整。
+5. **竖屏排版**：画布纯白，标题在顶部，卡片**上 A 下 B**（等宽、保持原始比例不变形、上下留 `56px` 纯白间距），底部 `220px` 纯白安全留白，**严禁任何底部提示语、字幕、翻译、解析或答案**。
+6. **输出文件命名区分方向**：竖屏产物文件名自动附加方向后缀（如 `pep_g4_u4_cat_portrait.mp4`），避免同目录横/竖屏互相覆盖；音频（`.mp3`）内容一致、不分方向。
+7. **渲染流水线**：`settings.apply_layout(orientation)` 把预设宽高写入 `settings.video`，`browser_recorder` 自动读取；Canvas 尺寸由模板 JS 动态读 `window.innerWidth/innerHeight`，**严禁在 HTML 中硬编码宽高**。

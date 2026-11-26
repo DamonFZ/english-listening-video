@@ -2,54 +2,78 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=1920, initial-scale=1.0" />
-  <title>纯听力 · 极简原图（横屏）</title>
+  <title>纯听力 · 极简原图（横竖屏自适应）</title>
   <style>
     html, body {
-      margin: 0; padding: 0; width: 1920px; height: 1080px;
+      margin: 0; padding: 0;
       background: #FFFFFF; overflow: hidden;
       font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     }
-    #stage { display: block; width: 1920px; height: 1080px; }
+    #stage { display: block; }
   </style>
 </head>
 <body>
-  <canvas id="stage" width="1920" height="1080"></canvas>
+  <canvas id="stage"></canvas>
   <!-- 音频元素：由 Python 注入 data URI；其音轨被并入录制流 -->
   <audio id="audio" preload="auto" crossorigin="anonymous"></audio>
 
   <script>
   (function () {
-    const W = 1920, H = 1080;
+    // ---------- 动态尺寸：浏览器视口即画幅 ----------
+    const W = window.innerWidth;
+    const H = window.innerHeight;
     const canvas = document.getElementById("stage");
+    canvas.width = W; canvas.height = H;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
     const ctx = canvas.getContext("2d");
     const audioEl = document.getElementById("audio");
-
-    // 布局：仅顶部标题 + 中间最大化对比图，无底栏文字（极简大图直出）
-    const TITLE_Y = 80;
-    const IMG_AREA = { x: 96, y: 130, w: 1728, h: 912 };   // 宽约 90%，高约 84%
 
     const BG = "#FFFFFF";
     const TITLE_COLOR = "#1f2937";
 
+    // ---------- 布局参数按方向分岔 ----------
+    // orientation 从 payload 读，这里先按横屏默认初始化，loadQuestion 后按需重算
+    let orient = "landscape";
+
+    function layoutParams() {
+      if (orient === "portrait") {
+        return {
+          titleY: 110,
+          titleSize: 58,
+          // 兜底：竖屏也提供 imgArea（contain 单一复合图用）
+          imgArea: { x: 72, y: 170, w: 936, h: 1420 },
+          topCardArea: { x: 72, y: 170, w: 936, h: 780 },
+          bottomCardArea: { x: 72, y: 1020, w: 936, h: 680 },
+          gapBetween: 56,
+          bottomSafeY: H - 220,   // 底部安全区起始 Y（220px 纯白留白，避开视频号/抖音底栏）
+          titleAlign: "center",
+          titleText: "英语听力：哪张图是对的？",
+          cardA: "A", cardB: "B",
+        };
+      }
+      // 默认横屏：单一复合图最大化
+      return {
+        titleY: 80,
+        titleSize: 66,
+        imgArea: { x: 96, y: 130, w: 1728, h: 912 },   // 宽约 90%，高约 84%
+        topCardArea: null,       // 横屏不用
+        bottomCardArea: null,
+        bottomSafeY: H,   // 横屏不强制底部安全区
+        titleAlign: "center",
+        titleText: "英语听力：哪张图是对的？",
+      };
+    }
+
     const state = {
       q: null,
-      img: null,
-      phase: "idle",   // idle | ready | listening | done
+      img: null,          // 横屏单一复合图
+      imgA: null,         // 竖屏上卡（图 A）
+      imgB: null,         // 竖屏下卡（图 B）
+      phase: "idle",
       flash: 0,
     };
 
     let audioCtx = null, audioDest = null;
-
-    function roundRect(x, y, w, h, r) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    }
 
     function drawBackground() {
       ctx.fillStyle = BG;
@@ -58,15 +82,17 @@
 
     function drawTitle() {
       const q = state.q || {};
-      const text = q.title || "英语听力";
+      const lp = layoutParams();
+      const text = q.title || lp.titleText;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillStyle = TITLE_COLOR;
-      ctx.font = "bold 66px 'PingFang SC', 'Microsoft YaHei', sans-serif";
-      ctx.fillText(text, W / 2, TITLE_Y);
+      ctx.font = "bold " + lp.titleSize + "px 'PingFang SC', 'Microsoft YaHei', sans-serif";
+      ctx.fillText(text, W / 2, lp.titleY);
     }
 
-    function drawImage() {
-      const a = IMG_AREA;
+    function drawSingleImage() {
+      const lp = layoutParams();
+      const a = lp.imgArea;
       if (state.img && state.img.complete && state.img.naturalWidth) {
         const iw = state.img.naturalWidth, ih = state.img.naturalHeight;
         const scale = Math.min(a.w / iw, a.h / ih);
@@ -80,10 +106,65 @@
       }
     }
 
+    function drawBadge(letter, cx, cy) {
+      // 蓝底白边粗体白字圆形徽标（覆盖原图自带的徽标，保证一致视觉）
+      const r = 46;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#2563eb";     // 蓝底
+      ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = "#FFFFFF"; ctx.stroke(); // 白边
+      ctx.fillStyle = "#FFFFFF";     // 白字
+      ctx.font = "bold 48px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(letter, cx, cy + 3);
+    }
+
+    function drawStackedCards() {
+      const lp = layoutParams();
+      drawCard(state.imgA, lp.topCardArea, "A", lp.cardA);
+      drawCard(state.imgB, lp.bottomCardArea, "B", lp.cardB);
+    }
+
+    function drawCard(img, area, badgeLetter, _letterKey) {
+      // 卡片底（纯白，不画边框，靠圆角卡片与画布的反差出层次）
+      roundRect(area.x, area.y, area.w, area.h, 28);
+      ctx.fillStyle = "#FFFFFF"; ctx.fill();
+
+      if (img && img.complete && img.naturalWidth) {
+        const iw = img.naturalWidth, ih = img.naturalHeight;
+        const scale = Math.min(area.w / iw, area.h / ih) * 0.96;   // 稍留内边距
+        const dw = iw * scale, dh = ih * scale;
+        const dx = area.x + (area.w - dw) / 2, dy = area.y + (area.h - dh) / 2;
+        ctx.drawImage(img, dx, dy, dw, dh);
+      } else {
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "32px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("（图片加载中）", area.x + area.w / 2, area.y + area.h / 2);
+      }
+      // 左上蓝圆徽标（覆盖原图自带）
+      drawBadge(badgeLetter, area.x + 60, area.y + 60);
+    }
+
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
     function render() {
       drawBackground();
       drawTitle();
-      drawImage();
+      if (orient === "portrait" && state.imgA && state.imgB) {
+        drawStackedCards();
+      } else {
+        drawSingleImage();
+      }
+      // 竖屏模式：底部安全区已在画布范围内（drawBackground 已填充纯白），
+      // 不用额外绘制任何底部元素。横屏也不画底部文字。
     }
 
     function tick() {
@@ -93,7 +174,7 @@
     }
     tick();
 
-    // ---------------- 音频图构建（与主模板一致，保证音轨并入录制流）----------------
+    // ---------------- 音频图构建 ----------------
     function ensureAudioGraph() {
       if (audioCtx) return audioDest.stream;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -117,19 +198,42 @@
 
       loadQuestion(payload) {
         state.q = payload || {};
+        orient = ((state.q && state.q.orientation) || "landscape").toString().toLowerCase();
         state.phase = "ready";
-        state.img = new Image();
-        state.img.crossOrigin = "anonymous";
-        return new Promise((resolve) => {
-          state.img.onload = () => { render(); resolve(true); };
-          state.img.onerror = () => { render(); resolve(false); };
-          state.img.src = (state.q && state.q.image) || "";
+
+        // 横屏：加载单一复合图
+        if (orient !== "portrait") {
+          state.img = new Image();
+          state.img.crossOrigin = "anonymous";
+          return new Promise((resolve) => {
+            state.img.onload = () => { render(); resolve(true); };
+            state.img.onerror = () => { render(); resolve(false); };
+            state.img.src = (state.q && state.q.image) || "";
+          });
+        }
+
+        // 竖屏：优先加载独立 A/B 图；缺一则回退到单一图 contain 缩放
+        const srcA = (state.q && state.q.imageA) || "";
+        const srcB = (state.q && state.q.imageB) || "";
+        const fallback = (state.q && state.q.image) || "";
+        const loadOne = (src) => new Promise((resolve) => {
+          if (!src) return resolve(null);
+          const im = new Image(); im.crossOrigin = "anonymous";
+          im.onload = () => resolve(im);
+          im.onerror = () => resolve(null);
+          im.src = src;
+        });
+        return Promise.all([loadOne(srcA || fallback), loadOne(srcB || fallback)]).then(([a, b]) => {
+          state.imgA = a;
+          state.imgB = b;
+          render();
+          return true;
         });
       },
 
       /**
-       * 极简纯听力流水线：展示原图 → 播放音频 → 音频播完自然收尾结束录制。
-       * 全程不展示答案、中文翻译或解析。opts.audioSrc 为音频 data URI。
+       * 极简纯听力流水线：展示图 → 播放音频 → 音频播完自然收尾。
+       * 全程不展示答案、翻译或解析；竖屏底部留白保持纯白。
        */
       async runFlow(opts) {
         opts = opts || {};
@@ -137,7 +241,10 @@
 
         // 等待图片就绪
         let tries = 0;
-        while ((!state.img || !state.img.complete) && tries < 150) {
+        const needsImg = (orient === "portrait")
+          ? ((!state.imgA || !state.imgA.complete) || (!state.imgB || !state.imgB.complete))
+          : (!state.img || !state.img.complete);
+        while (needsImg && tries < 150) {
           await new Promise(r => setTimeout(r, 30)); tries++;
         }
 
@@ -197,7 +304,8 @@
       },
 
       reset() {
-        state.q = null; state.phase = "idle"; state.img = null;
+        state.q = null; state.phase = "idle";
+        state.img = null; state.imgA = null; state.imgB = null;
         audioEl.pause(); audioEl.removeAttribute("src");
         render();
         return true;

@@ -35,8 +35,13 @@ class BrowserRecorder:
         question: Question,
         audio_path: str | Path,
         output_video_path: str | Path,
+        orientation: str = "landscape",
     ) -> Path:
-        """录制一道题的视频，返回输出视频路径（.webm）。"""
+        """录制一道题的视频，返回输出视频路径（.webm）。
+
+        orientation 决定模板如何布局（landscape = 单一复合图；portrait = 上 A 下 B）。
+        viewport 宽高已由调用方预先写入 settings.video（通过 settings.apply_layout）。
+        """
         template_path = self.cfg.template_path(question.question_type)
         if not template_path.exists():
             raise FileNotFoundError(f"题型模板不存在：{template_path}")
@@ -69,7 +74,7 @@ class BrowserRecorder:
                 page.set_default_timeout(120000)
                 page.goto(template_path.resolve().as_uri())
 
-                payload = question.to_stage_payload()
+                payload = question.to_stage_payload(orientation=orientation.lower())
                 page.evaluate(
                     "async (p) => { await window.Stage.loadQuestion(p); }", payload
                 )

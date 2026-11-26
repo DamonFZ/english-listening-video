@@ -4,6 +4,8 @@
 设计原则：
 - 不写死单一学段：学段通过 level 标识映射到 config/curriculum/<level>.json。
 - 不写死单一题型：题型通过 question_type 映射到 templates/<question_type>.html。
+- 不写死单一画幅：画幅通过 orientation 标识映射到 config/layouts.json 的预设
+  （仅支持 landscape / portrait 二选一；不提供 both 模式）。
 - 所有可调参数集中在此，便于后续扩展到小学其他年级 / 初中 / 高中。
 """
 from __future__ import annotations
@@ -20,8 +22,12 @@ from dotenv import load_dotenv
 ROOT_DIR: Path = Path(__file__).resolve().parent.parent
 CONFIG_DIR: Path = ROOT_DIR / "config"
 CURRICULUM_DIR: Path = CONFIG_DIR / "curriculum"
+LAYOUTS_JSON: Path = CONFIG_DIR / "layouts.json"
 TEMPLATES_DIR: Path = ROOT_DIR / "templates"
 INPUT_DIR: Path = ROOT_DIR / "input"
+
+# 仅支持二选一：严禁扩展出 both 模式
+SUPPORTED_ORIENTATIONS = ("landscape", "portrait")
 
 # 加载 .env（若存在）；不覆盖已存在的环境变量，方便 CI/命令行注入
 load_dotenv(ROOT_DIR / ".env", override=False)
@@ -52,6 +58,19 @@ def _get_float(name: str, default: float) -> float:
         return float(val)
     except ValueError as exc:  # pragma: no cover - 配置错误时给出明确提示
         raise ValueError(f"环境变量 {name} 必须是数字，当前值：{val!r}") from exc
+
+
+def _get_orientation(name: str, default: str = "landscape") -> str:
+    """读取方向配置，非法值时报错提示可选范围。"""
+    val = os.getenv(name)
+    if val is None or val.strip() == "":
+        return default
+    v = val.strip().lower()
+    if v not in SUPPORTED_ORIENTATIONS:
+        raise ValueError(
+            f"环境变量 {name} 必须是 {' 或 '.join(SUPPORTED_ORIENTATIONS)} 之一，当前值：{val!r}"
+        )
+    return v
 
 
 def _is_real_value(val: str) -> bool:
@@ -108,10 +127,11 @@ class VolcTTSConfig:
 
 @dataclass
 class VideoConfig:
-    """视频默认参数（横屏 1920x1080）。"""
+    """视频默认参数（宽高由当前 orientation 决定；fps 等参数固定）。"""
 
-    width: int = field(default_factory=lambda: _get_int("VIDEO_WIDTH", 1920))
-    height: int = field(default_factory=lambda: _get_int("VIDEO_HEIGHT", 1080))
+    orientation: str = field(default_factory=lambda: _get_orientation("VIDEO_ORIENTATION", "landscape"))
+    width: int = 0   # 运行时由 load_layout 覆盖；0 占位
+    height: int = 0  # 运行时由 load_layout 覆盖；0 占位
     fps: int = field(default_factory=lambda: _get_int("VIDEO_FPS", 30))
     read_times: int = field(default_factory=lambda: _get_int("DEFAULT_READ_TIMES", 2))
     countdown_seconds: int = field(default_factory=lambda: _get_int("COUNTDOWN_SECONDS", 3))
@@ -156,6 +176,27 @@ class Settings:
         """返回缺失/不合法配置的提示列表；空列表表示通过。"""
         errors: List[str] = []
 
+        # 画幅方向必须是受支持的二选一
+        if self.video.orientation not in SUPPORTED_ORIENTATIONS:
+            errors.append(
+                f"VIDEO_ORIENTATION 必须是 {' 或 '.join(SUPPORTED_ORIENTATIONS)} 之一，"
+                f"当前值：{self.video.orientation!r}"
+            )
+
+        # layouts.json 必须存在且包含当前 orientation
+        if not LAYOUTS_JSON.exists():
+            errors.append(f"画幅预设文件不存在：{LAYOUTS_JSON}")
+        else:
+            try:
+                with LAYOUTS_JSON.open("r", encoding="utf-8") as f:
+                    layouts = json.load(f)
+                if self.video.orientation not in layouts:
+                    errors.append(
+                        f"config/layouts.json 中缺少 {self.video.orientation!r} 预设"
+                    )
+            except json.JSONDecodeError as exc:
+                errors.append(f"config/layouts.json 解析失败：{exc}")
+
         # 学段配置文件必须存在
         if not self.curriculum_path(self.default_level).exists():
             errors.append(
@@ -171,7 +212,8 @@ class Settings:
             )
 
         # 视频参数合理性
-        if self.video.width <= 0 or self.video.height <= 0:
+        # 注意：width/height 为 0 表示尚未调用 apply_layout()，不算错
+        if 0 < self.video.width <= 0 or 0 < self.video.height <= 0:
             errors.append("VIDEO_WIDTH / VIDEO_HEIGHT 必须为正整数")
         if not (1 <= self.video.fps <= 120):
             errors.append("VIDEO_FPS 建议在 1~120 之间")
@@ -179,6 +221,31 @@ class Settings:
             errors.append("DEFAULT_READ_TIMES 必须 >= 1")
 
         return errors
+
+    # ---------- 画幅布局加载 ----------
+    def load_layout(self, orientation: Optional[str] = None) -> Dict[str, Any]:
+        """从 config/layouts.json 读取指定 orientation 的布局预设，返回完整 dict。"""
+        target = orientation or self.video.orientation
+        if target not in SUPPORTED_ORIENTATIONS:
+            raise ValueError(
+                f"orientation 必须是 {' 或 '.join(SUPPORTED_ORIENTATIONS)} 之一，当前值：{target!r}"
+            )
+        if not LAYOUTS_JSON.exists():
+            raise FileNotFoundError(f"画幅预设文件不存在：{LAYOUTS_JSON}")
+        with LAYOUTS_JSON.open("r", encoding="utf-8") as f:
+            layouts = json.load(f)
+        if target not in layouts:
+            raise KeyError(f"config/layouts.json 中缺少 {target!r} 预设")
+        return layouts[target]
+
+    def apply_layout(self, orientation: Optional[str] = None) -> Dict[str, Any]:
+        """读取并应用画幅预设到 self.video（覆盖 width/height），返回预设 dict。"""
+        target = orientation or self.video.orientation
+        layout = self.load_layout(target)
+        self.video.orientation = target
+        self.video.width = int(layout["width"])
+        self.video.height = int(layout["height"])
+        return layout
 
     # ---------- 路径辅助 ----------
     def curriculum_path(self, level: str) -> Path:

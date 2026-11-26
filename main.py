@@ -135,6 +135,7 @@ def run_pipeline(
     script: str | None = None,
     speed: float | None = None,
     read_times: int | None = None,
+    orientation: str | None = None,
 ) -> int:
     from src.question_generator import PURE_LISTENING, QuestionGenerator
     from src.volc_tts import TTSParams, VolcTTS, VolcTTSError, generate_tone_wav
@@ -150,6 +151,14 @@ def run_pipeline(
     target_level = level or settings.default_level
     target_type = question_type or settings.default_type
 
+    # 画幅方向：CLI > .env > 默认 landscape
+    target_orientation = (orientation or settings.video.orientation or "landscape").lower()
+    if target_orientation not in ("landscape", "portrait"):
+        print(f"[ERROR] orientation 必须是 landscape 或 portrait，当前值：{target_orientation!r}"); return 2
+
+    # 加载画幅预设并覆盖 settings.video 宽高（browser_recorder / 转码器自动生效）
+    layout = settings.apply_layout(target_orientation)
+
     # 纯听力模式：指定了 --script 或 --type pure_listening
     is_pure = (target_type == PURE_LISTENING) or bool(script)
     if is_pure:
@@ -162,27 +171,44 @@ def run_pipeline(
     debug_path = out_dir / "question_debug.json"
 
     print("=" * 64)
-    print("  英语听力短视频生成 - 端到端流水线（横屏 MP4）")
+    orient_label = "横屏 16:9" if target_orientation == "landscape" else "竖屏 9:16"
+    print(f"  英语听力短视频生成 - 端到端流水线（{orient_label}）")
     print("=" * 64)
     print(f"输入图片 : {img}")
     print(f"学段     : {target_level}")
     print(f"题型     : {target_type}")
-    print(f"分辨率   : {settings.video.width}x{settings.video.height} @ {settings.video.fps}fps")
+    print(f"画幅     : {target_orientation} → {settings.video.width}x{settings.video.height} @ {settings.video.fps}fps")
     print(f"输出目录 : {out_dir}")
     print("-" * 64)
 
-    # 0) 图片预处理：渲染前裁切原图外围多余纯白空边，使 A/B 卡片更大、留白更克制
-    print("[0/4] 图片预处理（裁切外围纯白空边）...")
-    from src.image_utils import image_size, trim_white_border
-    render_img = out_dir / f"{img.stem}_render.png"
-    render_img = trim_white_border(img, render_img)
-    print(f"  原图尺寸 : {image_size(img)} → 渲染尺寸 : {image_size(render_img)}")
+    # 0) 图片预处理
+    from src.image_utils import image_size, trim_white_border, split_ab_image_white_gap
+    stem = img.stem
+    orient_suffix = f"_{target_orientation}"   # 竖屏文件命名后缀：pep_g4_u4_cat_portrait.mp4
+    print(f"[0/4] 图片预处理 ...")
+
+    if target_orientation == "portrait":
+        # 竖屏模式：先裁掉原图外围多余白边，再沿白缝切为左右两张独立卡片
+        full_render = trim_white_border(img, out_dir / f"{stem}_trim.png")
+        imgA_path, imgB_path = split_ab_image_white_gap(full_render, out_dir)
+        print(f"  原图尺寸 : {image_size(img)} → 裁切后 {image_size(full_render)}")
+        print(f"  白缝切图 : {imgA_path.name} {image_size(imgA_path)} + {imgB_path.name} {image_size(imgB_path)}")
+        render_img = full_render   # 复合图仍传给单一图场景兜底（如 image_ab_choice 模板）
+    else:
+        # 横屏模式：保持不变，只裁外围多余白边
+        render_img = trim_white_border(img, out_dir / f"{stem}_render.png")
+        imgA_path = imgB_path = None
+        print(f"  原图尺寸 : {image_size(img)} → 渲染尺寸 : {image_size(render_img)}")
 
     # 1) 出题（纯听力模式用指定稿件，不调用 LLM；否则看图出题）
     print("[1/4] 生成听力文案 ...")
     gen = QuestionGenerator()
     if is_pure:
-        question = gen.generate_pure(script, render_img, level=target_level, save_debug=debug_path)
+        if target_orientation == "portrait" and imgA_path and imgB_path:
+            question = gen.generate_pure(script, imgA_path, image_b=imgB_path,
+                                          level=target_level, save_debug=debug_path)
+        else:
+            question = gen.generate_pure(script, render_img, level=target_level, save_debug=debug_path)
         print(f"  模式     : 纯听力（pure_listening，画面不展示答案/翻译/解析）")
         print(f"  英文听力稿: {question.audio_text}")
     else:
@@ -200,11 +226,11 @@ def run_pipeline(
     print("[2/4] 合成听力音频 ...")
     from src.audio_utils import probe_duration, prepend_intro_sfx
 
-    stem = img.stem
     intro_cfg = settings.intro_sfx
     intro_on = intro_cfg.is_available()
-    final_audio = out_dir / f"{stem}.mp3"        # 最终用于录制的音频（含提示音时为拼接结果）
-    speech_audio: Path | None = None             # 仅语音（不含提示音），用于时长统计/拼接源
+    # 音频不分方向（内容相同），用 stem 即可
+    final_audio = out_dir / f"{stem}.mp3"
+    speech_audio: Path | None = None
 
     try:
         tts = VolcTTS()
@@ -260,16 +286,16 @@ def run_pipeline(
     print(f"  语音时长   : {speech_dur:.2f}s")
     print(f"  总音频时长 : {total_dur:.2f}s（提示音 + 停顿 + 语音）")
 
-    # 3) 浏览器无头录制 webm（音画同录）
+    # 3) 浏览器无头录制 webm（音画同录；webm 按方向分文件，避免同目录覆盖）
     print("[3/4] 浏览器无头录制（Canvas + WebAudio → webm）...")
-    webm_path = out_dir / f"{img.stem}.webm"
+    webm_path = out_dir / f"{stem}{orient_suffix}.webm"
     rec = BrowserRecorder()
-    rec.record(question, final_audio, webm_path)
+    rec.record(question, final_audio, webm_path, orientation=target_orientation)
     print(f"  录制完成 webm : {webm_path} ({webm_path.stat().st_size} bytes)")
 
-    # 4) 转码为正式 mp4（H.264 + AAC，含完整音轨）
+    # 4) 转码为正式 mp4（H.264 + AAC，含完整音轨；文件名带方向后缀）
     print("[4/4] 转码为正式 MP4（H.264/AAC，imageio-ffmpeg 捆绑二进制）...")
-    mp4_path = out_dir / f"{img.stem}.mp4"
+    mp4_path = out_dir / f"{stem}{orient_suffix}.mp4"
     final_video = mp4_path
     try:
         transcode_to_mp4(webm_path, mp4_path, fps=settings.video.fps)
@@ -310,6 +336,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="覆盖语速倍率（如 0.85），范围 0.5~2.0")
     p.add_argument("--read-times", type=int, dest="read_times", metavar="N",
                    help="覆盖朗读遍数")
+    p.add_argument("--orientation", choices=["landscape", "portrait"],
+                   help="画幅方向（覆盖 .env VIDEO_ORIENTATION）；默认读取 .env 或 landscape")
     return p
 
 
@@ -321,11 +349,14 @@ def main(argv=None) -> int:
         return run_pipeline(
             args.input, args.level, args.question_type,
             script=args.script, speed=args.speed, read_times=args.read_times,
+            orientation=args.orientation,
         )
     build_parser().print_help()
     print("\n示例：python main.py --input input/test_ab_bag.jpeg --level primary_g4")
     print("纯听力：python main.py --input input/xxx.jpeg --level primary_g4 --type pure_listening "
           "--script \"Look at...\"")
+    print("竖屏测试：python main.py --input input/xxx.png --level primary_g4 --orientation portrait "
+          "--script \"...\"")
     return 0
 
 
